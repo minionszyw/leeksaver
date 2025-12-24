@@ -5,6 +5,7 @@
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
@@ -66,7 +67,7 @@ async def init_db() -> None:
     logger.info("初始化数据库连接", database_url=settings.database_url[:50] + "...")
     # 测试连接
     async with engine.begin() as conn:
-        await conn.execute("SELECT 1")
+        await conn.execute(text("SELECT 1"))
     logger.info("数据库连接成功")
 
 
