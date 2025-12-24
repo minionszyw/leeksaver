@@ -55,23 +55,34 @@ class StockRepository:
         if not stocks:
             return 0
 
-        stmt = insert(Stock).values(stocks)
-        stmt = stmt.on_conflict_do_update(
-            index_elements=["code"],
-            set_={
-                "name": stmt.excluded.name,
-                "market": stmt.excluded.market,
-                "asset_type": stmt.excluded.asset_type,
-                "industry": stmt.excluded.industry,
-                "is_active": stmt.excluded.is_active,
-            },
-        )
+        # 分批插入，避免超过 PostgreSQL 参数限制 (32767)
+        # 每个股票约 6 个字段，所以每批 1000 条应该安全
+        batch_size = 1000
+        total_count = 0
 
-        await self.session.execute(stmt)
+        for i in range(0, len(stocks), batch_size):
+            batch = stocks[i:i + batch_size]
+
+            stmt = insert(Stock).values(batch)
+            stmt = stmt.on_conflict_do_update(
+                index_elements=["code"],
+                set_={
+                    "name": stmt.excluded.name,
+                    "market": stmt.excluded.market,
+                    "asset_type": stmt.excluded.asset_type,
+                    "industry": stmt.excluded.industry,
+                    "is_active": stmt.excluded.is_active,
+                },
+            )
+
+            await self.session.execute(stmt)
+            total_count += len(batch)
+
+            logger.info("批量更新股票（批次）", batch=i//batch_size + 1, count=len(batch))
+
         await self.session.commit()
-
-        logger.info("批量更新股票", count=len(stocks))
-        return len(stocks)
+        logger.info("批量更新股票完成", total=total_count)
+        return total_count
 
     async def get_codes_by_market(self, market: str) -> list[str]:
         """获取指定市场的所有股票代码"""
