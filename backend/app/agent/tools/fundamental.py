@@ -11,6 +11,7 @@ from app.core.database import get_db_session
 from app.core.logging import get_logger
 from app.repositories.stock_repository import StockRepository
 from app.repositories.market_data_repository import MarketDataRepository
+from app.repositories.financial_repository import FinancialRepository
 from app.agent.tools.base import ToolBase, ToolResult, ToolRegistry
 from app.agent.schema.tool_schemas import (
     FundamentalInput,
@@ -40,6 +41,7 @@ class FundamentalTool(ToolBase):
             async with get_db_session() as session:
                 stock_repo = StockRepository(session)
                 market_repo = MarketDataRepository(session)
+                financial_repo = FinancialRepository(session)
 
                 # 获取股票基本信息
                 stock = await stock_repo.get_by_code(code)
@@ -49,9 +51,8 @@ class FundamentalTool(ToolBase):
                 # 获取最新行情用于计算市值等
                 quote = await market_repo.get_latest_quote(code)
 
-                # 注意：实际的财务数据需要从专门的数据源获取
-                # 这里演示数据结构，实际应调用 AkShare 的财务接口
-                metrics = await self._get_financial_metrics(code)
+                # 获取财务数据
+                metrics = await self._get_financial_metrics(financial_repo, code)
 
                 # 分析亮点和风险
                 highlights, risks = self._analyze_financials(metrics)
@@ -76,24 +77,33 @@ class FundamentalTool(ToolBase):
             logger.error("基本面分析失败", error=str(e))
             return ToolResult(success=False, error=str(e))
 
-    async def _get_financial_metrics(self, code: str) -> FinancialMetrics:
+    async def _get_financial_metrics(
+        self, repo: FinancialRepository, code: str
+    ) -> FinancialMetrics:
         """
         获取财务指标
-
-        注意：实际实现应从 AkShare 获取真实数据
-        这里返回占位数据结构
         """
-        # TODO: 调用 AkShare 接口获取真实财务数据
-        # 例如: ak.stock_financial_analysis_indicator(symbol=code)
+        statement = await repo.get_latest_statement(code)
+        
+        if not statement:
+            return FinancialMetrics(
+                revenue=None,
+                revenue_yoy=None,
+                net_profit=None,
+                profit_yoy=None,
+                roe=None,
+                gross_margin=None,
+                debt_ratio=None,
+            )
 
         return FinancialMetrics(
-            revenue=None,
-            revenue_yoy=None,
-            net_profit=None,
-            profit_yoy=None,
-            roe=None,
-            gross_margin=None,
-            debt_ratio=None,
+            revenue=statement.total_revenue,
+            revenue_yoy=statement.revenue_yoy,
+            net_profit=statement.net_profit,
+            profit_yoy=statement.net_profit_yoy,
+            roe=statement.roe_weighted,
+            gross_margin=statement.gross_profit_margin,
+            debt_ratio=statement.debt_asset_ratio,
         )
 
     def _analyze_financials(

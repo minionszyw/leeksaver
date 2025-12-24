@@ -13,6 +13,7 @@ from app.config import settings
 from app.models.base import Base
 from app.models.stock import Stock, Watchlist
 from app.models.market_data import DailyQuote, MinuteQuote
+from app.models.financial import FinancialStatement
 
 # Alembic Config 对象
 config = context.config

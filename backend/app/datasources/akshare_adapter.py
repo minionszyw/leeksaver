@@ -171,11 +171,214 @@ class AkShareAdapter(DataSourceBase):
                 pl.col("换手率").cast(pl.Decimal(8, 4)).alias("turnover_rate"),
             )
 
+            # 数据清洗：过滤掉关键字段为空或为 0 的记录
+            original_count = len(result)
+
+            # 基础清洗：价格和成交量必须有效
+            result = result.filter(
+                pl.col("open").is_not_null() & (pl.col("open") > 0) &
+                pl.col("high").is_not_null() & (pl.col("high") > 0) &
+                pl.col("low").is_not_null() & (pl.col("low") > 0) &
+                pl.col("close").is_not_null() & (pl.col("close") > 0) &
+                pl.col("volume").is_not_null() & (pl.col("volume") > 0)
+            )
+
+            # 高级清洗规则
+            # 1. 高低价倒挂检测：high 必须 >= low
+            result = result.filter(pl.col("high") >= pl.col("low"))
+
+            # 2. 价格合理性检测：开盘价、最高价、最低价应在收盘价的合理范围内
+            #    允许涨跌停板（±10%）+ 一些缓冲（±25% 覆盖所有正常情况）
+            result = result.filter(
+                (pl.col("high") <= pl.col("close") * 1.25) &
+                (pl.col("low") >= pl.col("close") * 0.75) &
+                (pl.col("open") <= pl.col("close") * 1.25) &
+                (pl.col("open") >= pl.col("close") * 0.75)
+            )
+
+            # 3. 涨跌幅合理性检测
+            #    正常股票 ±20%（包含特殊情况）
+            #    注：这里使用较宽松的限制，因为有些特殊情况（复牌、重组等）可能有大涨跌
+            result = result.filter(
+                pl.col("change_pct").abs() <= 30.0  # 绝对值不超过 30%
+            )
+
+            filtered_count = len(result)
+            dropped = original_count - filtered_count
+            if dropped > 0:
+                drop_rate = (dropped / original_count * 100) if original_count > 0 else 0
+                logger.warning(
+                    "过滤无效行情数据",
+                    code=code,
+                    original=original_count,
+                    filtered=filtered_count,
+                    dropped=dropped,
+                    drop_rate=f"{drop_rate:.2f}%"
+                )
+
             logger.debug("获取日线行情成功", code=code, count=len(result))
             return result
 
         except Exception as e:
             logger.error("获取日线行情失败", code=code, error=str(e))
+            raise
+
+    async def get_financial_statements(
+        self,
+        code: str,
+        limit: int = 8,
+    ) -> pl.DataFrame:
+        """
+        获取股票财务指标数据
+
+        使用 stock_financial_abstract_ths 接口（同花顺数据源）
+        返回最近 N 个报告期的财务数据
+
+        Args:
+            code: 股票代码
+            limit: 返回最近 N 个报告期，默认 8 个（最近 2 年）
+
+        Returns:
+            包含财务指标的 Polars DataFrame
+        """
+        logger.debug("获取财务数据", code=code, limit=limit)
+
+        try:
+            # 调用 AkShare 接口（同花顺-业绩报表）
+            df = await self._run_sync(
+                ak.stock_financial_abstract_ths,
+                symbol=code,
+                indicator="业绩报表",
+            )
+
+            if df is None or df.empty:
+                logger.warning("财务数据为空", code=code)
+                return pl.DataFrame()
+
+            # 在 Pandas 中处理报告期转换（YYYY → YYYY-12-31）
+            df["end_date"] = df["报告期"].apply(
+                lambda x: f"{x}-12-31" if len(str(x)) == 4 else str(x)
+            )
+
+            # 将所有列转换为字符串类型，避免 Polars 类型推断错误
+            for col in df.columns:
+                df[col] = df[col].astype(str)
+
+            # 转换为 Polars DataFrame
+            result = pl.from_pandas(df)
+
+            # 在 Polars 中解析日期
+            result = result.with_columns([
+                pl.col("end_date").str.to_date("%Y-%m-%d").alias("end_date")
+            ])
+
+            # 过滤空日期
+            result = result.filter(pl.col("end_date").is_not_null())
+
+            # 首先，将所有相关列转换为字符串类型
+            result = result.with_columns([
+                pl.col(col).cast(pl.Utf8) for col in result.columns if col != "end_date" and col != "报告期" and col != "code"
+            ])
+
+            # 辅助函数：解析数值（处理百分比和中文单位）
+            def parse_numeric_column(col_name: str, decimal_type: tuple = (20, 2)):
+                """解析数值列，处理 X.XX亿、X.XX% 等格式"""
+                # 使用 fill_null 处理 null 值，使用 str.replace_all 处理 False
+                col = (
+                    pl.col(col_name)
+                    .fill_null("0")
+                    .str.replace_all("False", "0")
+                    .str.replace_all("%", "")
+                    .str.replace_all("亿", "e8")  # 使用科学计数法
+                    .str.replace_all("万", "e4")
+                )
+
+                # 转换为浮点数然后转decimal
+                return (
+                    col.cast(pl.Float64, strict=False)
+                    .cast(pl.Decimal(decimal_type[0], decimal_type[1]))
+                    .alias(col_name)
+                )
+
+            # 检查列是否存在（银行股没有毛利率）
+            has_gross_margin = "销售毛利率" in result.columns
+
+            # 规范化列名并映射到模型字段
+            columns_to_add = [
+                pl.lit(code).alias("code"),
+                # 核心指标（金额单位：元，从亿转换）
+                parse_numeric_column("营业总收入", (20, 2)),
+                parse_numeric_column("净利润", (20, 2)),
+                parse_numeric_column("扣非净利润", (20, 2)),
+                parse_numeric_column("每股经营现金流", (10, 4)),
+                # 盈利能力（百分比）
+                parse_numeric_column("净资产收益率-摊薄", (10, 4)),
+                parse_numeric_column("销售净利率", (10, 4)),
+                # 成长能力（百分比）
+                parse_numeric_column("营业总收入同比增长率", (10, 4)),
+                parse_numeric_column("净利润同比增长率", (10, 4)),
+                # 偿债与运营
+                parse_numeric_column("资产负债率", (10, 4)),
+                parse_numeric_column("基本每股收益", (10, 4)),
+                parse_numeric_column("每股净资产", (10, 4)),
+            ]
+
+            # 只有非银行股才有毛利率
+            if has_gross_margin:
+                columns_to_add.insert(6, parse_numeric_column("销售毛利率", (10, 4)))
+
+            result = result.with_columns(columns_to_add)
+
+            # 重命名列以匹配模型
+            select_columns = [
+                pl.col("code"),
+                pl.col("end_date"),
+                pl.col("营业总收入").alias("total_revenue"),
+                pl.col("净利润").alias("net_profit"),
+                pl.col("扣非净利润").alias("deduct_net_profit"),
+                pl.lit(None, dtype=pl.Decimal(20, 2)).alias("net_cash_flow_oper"),  # 占位，后续可补充
+                pl.col("净资产收益率-摊薄").alias("roe_weighted"),
+            ]
+
+            # 如果有毛利率列，添加它；否则用 NULL
+            if has_gross_margin:
+                select_columns.append(pl.col("销售毛利率").alias("gross_profit_margin"))
+            else:
+                select_columns.append(pl.lit(None, dtype=pl.Decimal(10, 4)).alias("gross_profit_margin"))
+
+            select_columns.extend([
+                pl.col("销售净利率").alias("net_profit_margin"),
+                pl.col("营业总收入同比增长率").alias("revenue_yoy"),
+                pl.col("净利润同比增长率").alias("net_profit_yoy"),
+                pl.col("资产负债率").alias("debt_asset_ratio"),
+                pl.col("基本每股收益").alias("eps"),
+                pl.col("每股净资产").alias("bps"),
+            ])
+
+            result = result.select(select_columns)
+
+            # 按日期降序排序，取最近 N 个
+            result = result.sort("end_date", descending=True).head(limit)
+
+            # 添加报告类型（根据月份判断）
+            result = result.with_columns(
+                pl.when(pl.col("end_date").dt.month() == 3)
+                .then(pl.lit("一季报"))
+                .when(pl.col("end_date").dt.month() == 6)
+                .then(pl.lit("中报"))
+                .when(pl.col("end_date").dt.month() == 9)
+                .then(pl.lit("三季报"))
+                .when(pl.col("end_date").dt.month() == 12)
+                .then(pl.lit("年报"))
+                .otherwise(pl.lit("其他"))
+                .alias("report_type")
+            )
+
+            logger.debug("获取财务数据成功", code=code, count=len(result))
+            return result
+
+        except Exception as e:
+            logger.error("获取财务数据失败", code=code, error=str(e))
             raise
 
     async def get_realtime_quote(self, code: str) -> dict[str, Any]:

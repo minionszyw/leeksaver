@@ -10,6 +10,7 @@ from app.agent.tools.base import ToolBase, ToolResult, ToolRegistry
 from app.agent.tools.fact_query import FactQueryTool
 from app.agent.tools.tech_analysis import TechAnalysisTool
 from app.agent.tools.fundamental import FundamentalTool
+from app.agent.tools.news_search import NewsSearchTool, StockNewsTool
 
 __all__ = [
     "ToolBase",
@@ -18,4 +19,6 @@ __all__ = [
     "FactQueryTool",
     "TechAnalysisTool",
     "FundamentalTool",
+    "NewsSearchTool",
+    "StockNewsTool",
 ]

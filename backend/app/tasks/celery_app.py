@@ -56,4 +56,46 @@ celery_app.conf.beat_schedule = {
         "schedule": crontab(minute=0),
         "args": (),
     },
+    # 每周六晚 20:00 同步全市场财务报表数据
+    "weekly-financial-sync": {
+        "task": "app.tasks.sync_tasks.sync_financial_statements",
+        "schedule": crontab(day_of_week=6, hour=20, minute=0),
+        "args": (),
+    },
+    # 每天早 8:00 同步全市场新闻
+    "morning-market-news-sync": {
+        "task": "app.tasks.sync_tasks.sync_market_news",
+        "schedule": crontab(hour=8, minute=0),
+        "args": (),
+    },
+    # 每天晚 18:00 同步全市场新闻
+    "evening-market-news-sync": {
+        "task": "app.tasks.sync_tasks.sync_market_news",
+        "schedule": crontab(hour=18, minute=0),
+        "args": (),
+    },
+    # 每天早 8:00 同步热门股票新闻
+    "morning-hot-stocks-news-sync": {
+        "task": "app.tasks.sync_tasks.sync_hot_stocks_news",
+        "schedule": crontab(hour=8, minute=5),
+        "args": (),
+    },
+    # 每天晚 18:00 同步热门股票新闻
+    "evening-hot-stocks-news-sync": {
+        "task": "app.tasks.sync_tasks.sync_hot_stocks_news",
+        "schedule": crontab(hour=18, minute=5),
+        "args": (),
+    },
+    # 每小时生成新闻向量
+    "hourly-news-embeddings": {
+        "task": "app.tasks.sync_tasks.generate_news_embeddings",
+        "schedule": crontab(minute=30),  # 每小时的第 30 分钟
+        "args": (),
+    },
+    # 每日收盘后同步板块行情（16:30）
+    "daily-sector-sync": {
+        "task": "app.tasks.sync_tasks.sync_sector_quotes",
+        "schedule": crontab(hour=16, minute=30),
+        "args": (),
+    },
 }
