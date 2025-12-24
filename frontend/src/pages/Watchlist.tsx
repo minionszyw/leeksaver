@@ -30,7 +30,9 @@ export default function Watchlist() {
     setRemoving(null)
   }
 
-  const handleAnalyze = (item: WatchlistItem) => {
+  const handleAnalyze = (item: WatchlistItem, e?: React.MouseEvent) => {
+    // 阻止事件冒泡，避免重复触发
+    e?.stopPropagation()
     // 跳转到首页并发送分析请求
     navigate('/')
     setTimeout(() => {
@@ -82,7 +84,7 @@ export default function Watchlist() {
       render: (_: unknown, record: WatchlistItem) => (
         <div className="flex items-center justify-end space-x-2">
           <button
-            onClick={() => handleAnalyze(record)}
+            onClick={(e) => handleAnalyze(record, e)}
             className="px-2 py-1 text-xs text-primary-400 hover:text-primary-300 transition-colors"
           >
             分析

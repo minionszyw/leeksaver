@@ -36,6 +36,8 @@ class FactQueryTool(ToolBase):
         try:
             input_data = self.validate_input(**kwargs)
             code = input_data.stock_code
+            # 规范化股票代码：去掉市场后缀（如 .SH, .SZ）
+            code = code.split('.')[0] if '.' in code else code
             query_type = input_data.query_type
 
             async with get_db_session() as session:

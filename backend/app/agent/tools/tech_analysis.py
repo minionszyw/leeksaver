@@ -44,6 +44,8 @@ class TechAnalysisTool(ToolBase):
         try:
             input_data = self.validate_input(**kwargs)
             code = input_data.stock_code
+            # 规范化股票代码：去掉市场后缀（如 .SH, .SZ）
+            code = code.split('.')[0] if '.' in code else code
             period = input_data.period
             indicators = input_data.indicators or ["ma", "macd"]
 

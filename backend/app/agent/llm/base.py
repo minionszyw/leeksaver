@@ -22,7 +22,7 @@ class LLMResponse(BaseModel):
 
     content: str = Field(..., description="响应内容")
     model: str = Field(..., description="使用的模型")
-    usage: dict[str, int] | None = Field(None, description="Token 使用情况")
+    usage: dict[str, Any] | None = Field(None, description="Token 使用情况")
     finish_reason: str | None = Field(None, description="结束原因")
 
 

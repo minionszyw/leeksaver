@@ -150,9 +150,16 @@ class AkShareAdapter(DataSourceBase):
             result = pl.from_pandas(df)
 
             # 规范化列名
+            # 处理日期列：如果是 date 类型直接使用，如果是字符串则转换
+            date_col = result["日期"]
+            if date_col.dtype == pl.Date:
+                trade_date_expr = pl.col("日期").alias("trade_date")
+            else:
+                trade_date_expr = pl.col("日期").str.to_date("%Y-%m-%d").alias("trade_date")
+
             result = result.select(
                 pl.lit(code).alias("code"),
-                pl.col("日期").str.to_date("%Y-%m-%d").alias("trade_date"),
+                trade_date_expr,
                 pl.col("开盘").cast(pl.Decimal(10, 2)).alias("open"),
                 pl.col("最高").cast(pl.Decimal(10, 2)).alias("high"),
                 pl.col("最低").cast(pl.Decimal(10, 2)).alias("low"),

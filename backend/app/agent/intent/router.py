@@ -142,7 +142,7 @@ class IntentRouter:
         response = await self.llm.chat(messages, temperature=0.1)
 
         # 解析响应
-        parsed = self._parse_response(response.content, query)
+        parsed = await self._parse_response(response.content, query)
 
         logger.info(
             "意图分类完成",
@@ -213,7 +213,7 @@ class IntentRouter:
 
         return None
 
-    def _parse_response(self, content: str, query: str) -> IntentClassificationResult:
+    async def _parse_response(self, content: str, query: str) -> IntentClassificationResult:
         """解析 LLM 响应"""
         data = extract_json_from_text(content)
 
@@ -254,6 +254,10 @@ class IntentRouter:
                 if code not in intent.stock_codes:
                     intent.stock_codes.append(code)
 
+        # 如果有股票名称但没有代码，尝试从数据库搜索
+        if intent.stock_names and not intent.stock_codes:
+            await self._resolve_stock_names(intent)
+
         needs_clarification = data.get("needs_clarification", False)
 
         # 如果需要股票但没有识别到，设置为需要澄清
@@ -265,6 +269,30 @@ class IntentRouter:
             needs_clarification=needs_clarification,
             clarification_question=data.get("clarification_question"),
         )
+
+    async def _resolve_stock_names(self, intent: ParsedIntent) -> None:
+        """
+        从数据库解析股票名称为代码
+
+        Args:
+            intent: 意图对象，会直接修改其 stock_codes
+        """
+        from app.core.database import get_db_session
+        from app.repositories.stock_repository import StockRepository
+
+        try:
+            async with get_db_session() as session:
+                repo = StockRepository(session)
+                for name in intent.stock_names:
+                    # 搜索股票
+                    stocks = await repo.search(name, limit=1)
+                    if stocks:
+                        code = stocks[0].code
+                        if code not in intent.stock_codes:
+                            intent.stock_codes.append(code)
+                            logger.info("解析股票名称", name=name, code=code)
+        except Exception as e:
+            logger.warning("解析股票名称失败", error=str(e))
 
     async def resolve_stock_names(
         self, names: list[str], search_func
