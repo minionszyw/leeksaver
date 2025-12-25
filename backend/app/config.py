@@ -145,6 +145,52 @@ class Settings(BaseSettings):
     cleanup_news_hour: int = Field(default=2, description="新闻清理小时")
     cleanup_news_minute: int = Field(default=0, description="新闻清理分钟")
 
+    # ==================== 新增数据同步配置 ====================
+
+    # 自选股实时同步（interval 模式）
+    sync_watchlist_interval_seconds: int = Field(
+        default=60, description="自选股行情同步间隔（秒）- 交易时段"
+    )
+    sync_watchlist_off_hours_interval: int = Field(
+        default=3600, description="自选股行情同步间隔（秒）- 非交易时段"
+    )
+
+    # 北向资金同步
+    sync_northbound_flow_hour: int = Field(default=16, description="北向资金同步小时")
+    sync_northbound_flow_minute: int = Field(default=30, description="北向资金同步分钟")
+
+    # 个股资金流向同步
+    sync_fund_flow_hour: int = Field(default=16, description="个股资金同步小时")
+    sync_fund_flow_minute: int = Field(default=35, description="个股资金同步分钟")
+
+    # 龙虎榜同步
+    sync_dragon_tiger_hour: int = Field(default=18, description="龙虎榜同步小时")
+    sync_dragon_tiger_minute: int = Field(default=0, description="龙虎榜同步分钟")
+
+    # 两融数据同步
+    sync_margin_trade_hour: int = Field(default=18, description="两融同步小时")
+    sync_margin_trade_minute: int = Field(default=30, description="两融同步分钟")
+
+    # 市场情绪同步
+    sync_market_sentiment_hour: int = Field(default=16, description="市场情绪同步小时")
+    sync_market_sentiment_minute: int = Field(default=40, description="市场情绪同步分钟")
+
+    # 估值数据同步
+    sync_valuation_hour: int = Field(default=17, description="估值数据同步小时")
+    sync_valuation_minute: int = Field(default=0, description="估值数据同步分钟")
+
+    # 技术指标计算
+    calc_tech_indicators_hour: int = Field(default=17, description="技术指标计算小时")
+    calc_tech_indicators_minute: int = Field(default=30, description="技术指标计算分钟")
+
+    # 批量处理配置
+    fund_flow_batch_size: int = Field(default=50, description="资金流向批量大小")
+    valuation_batch_size: int = Field(default=100, description="估值数据批量大小")
+    tech_indicator_batch_size: int = Field(default=100, description="技术指标批量大小")
+    tech_indicator_history_days: int = Field(
+        default=120, description="技术指标计算所需的历史数据天数"
+    )
+
     # 向量服务配置
     embedding_provider: Literal["openai", "siliconflow", "ollama"] = Field(
         default="openai", description="向量服务提供商"

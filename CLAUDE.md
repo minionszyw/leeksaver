@@ -479,6 +479,5 @@ embedding = await provider.generate_embedding(text)
 
 ## 项目文档
 
-- **系统设计文档**：`docs/系统设计说明书.md`
 - **部署指南**：`docs/DEPLOYMENT.md`
 - **开发指南**：`docs/DEVELOPMENT.md`

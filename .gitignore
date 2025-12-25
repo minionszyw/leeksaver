@@ -78,4 +78,5 @@ celerybeat.pid
 # Alembic
 alembic/versions/*.pyc
 
-review.md
+debug_*.py
+test_*.py

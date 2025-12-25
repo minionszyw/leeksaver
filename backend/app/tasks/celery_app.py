@@ -130,4 +130,71 @@ celery_app.conf.beat_schedule = {
         ),
         "args": (),
     },
+    # ==================== 资金面同步任务 ====================
+    # 每日收盘后同步北向资金
+    "daily-northbound-flow-sync": {
+        "task": "app.tasks.sync_tasks.sync_northbound_flow",
+        "schedule": crontab(
+            hour=settings.sync_northbound_flow_hour,
+            minute=settings.sync_northbound_flow_minute,
+        ),
+        "args": (),
+    },
+    # 每日收盘后同步个股资金流向
+    "daily-fund-flow-sync": {
+        "task": "app.tasks.sync_tasks.sync_stock_fund_flow",
+        "schedule": crontab(
+            hour=settings.sync_fund_flow_hour,
+            minute=settings.sync_fund_flow_minute,
+        ),
+        "args": (),
+    },
+    # 每日晚间同步龙虎榜
+    "daily-dragon-tiger-sync": {
+        "task": "app.tasks.sync_tasks.sync_dragon_tiger",
+        "schedule": crontab(
+            hour=settings.sync_dragon_tiger_hour,
+            minute=settings.sync_dragon_tiger_minute,
+        ),
+        "args": (),
+    },
+    # 每日晚间同步两融数据
+    "daily-margin-trade-sync": {
+        "task": "app.tasks.sync_tasks.sync_margin_trade",
+        "schedule": crontab(
+            hour=settings.sync_margin_trade_hour,
+            minute=settings.sync_margin_trade_minute,
+        ),
+        "args": (),
+    },
+    # ==================== 情绪面同步任务 ====================
+    # 每日收盘后同步市场情绪
+    "daily-market-sentiment-sync": {
+        "task": "app.tasks.sync_tasks.sync_market_sentiment",
+        "schedule": crontab(
+            hour=settings.sync_market_sentiment_hour,
+            minute=settings.sync_market_sentiment_minute,
+        ),
+        "args": (),
+    },
+    # ==================== 估值同步任务 ====================
+    # 每日收盘后同步估值数据
+    "daily-valuation-sync": {
+        "task": "app.tasks.sync_tasks.sync_daily_valuation",
+        "schedule": crontab(
+            hour=settings.sync_valuation_hour,
+            minute=settings.sync_valuation_minute,
+        ),
+        "args": (),
+    },
+    # ==================== 技术指标任务 ====================
+    # 每日收盘后计算技术指标
+    "daily-tech-indicator-calc": {
+        "task": "app.tasks.sync_tasks.calculate_tech_indicators",
+        "schedule": crontab(
+            hour=settings.calc_tech_indicators_hour,
+            minute=settings.calc_tech_indicators_minute,
+        ),
+        "args": (),
+    },
 }

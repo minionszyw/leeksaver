@@ -14,6 +14,13 @@ from app.models.base import Base
 from app.models.stock import Stock, Watchlist
 from app.models.market_data import DailyQuote, MinuteQuote
 from app.models.financial import FinancialStatement
+from app.models.news import NewsArticle
+from app.models.macro import MacroIndicator
+from app.models.sector import Sector, SectorQuote
+from app.models.capital_flow import NorthboundFlow, StockFundFlow, DragonTiger, MarginTrade
+from app.models.market_sentiment import MarketSentiment, LimitUpStock
+from app.models.valuation import DailyValuation
+from app.models.tech_indicator import TechIndicator
 
 # Alembic Config 对象
 config = context.config
