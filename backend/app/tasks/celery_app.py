@@ -42,66 +42,92 @@ celery_app.conf.update(
     worker_concurrency=4,
 )
 
-# 定时任务配置 (Celery Beat)
+# 定时任务配置 (Celery Beat) - 从配置读取 CRON 表达式
 celery_app.conf.beat_schedule = {
-    # L1: 每日收盘后同步全市场日线数据 (16:00)
+    # L1: 每日收盘后同步全市场日线数据
     "daily-market-sync": {
         "task": "app.tasks.sync_tasks.sync_daily_quotes",
-        "schedule": crontab(hour=16, minute=0),
+        "schedule": crontab(
+            hour=settings.sync_daily_quotes_hour,
+            minute=settings.sync_daily_quotes_minute,
+        ),
         "args": (),
     },
     # L2: 每小时同步自选股数据
     "watchlist-sync": {
         "task": "app.tasks.sync_tasks.sync_watchlist_quotes",
-        "schedule": crontab(minute=0),
+        "schedule": crontab(minute=settings.sync_watchlist_quotes_minute),
         "args": (),
     },
-    # 每周六晚 20:00 同步全市场财务报表数据
+    # 每周同步全市场财务报表数据
     "weekly-financial-sync": {
         "task": "app.tasks.sync_tasks.sync_financial_statements",
-        "schedule": crontab(day_of_week=6, hour=20, minute=0),
+        "schedule": crontab(
+            day_of_week=settings.sync_financial_day_of_week,
+            hour=settings.sync_financial_hour,
+            minute=settings.sync_financial_minute,
+        ),
         "args": (),
     },
-    # 每天早 8:00 同步全市场新闻
+    # 早间同步全市场新闻
     "morning-market-news-sync": {
         "task": "app.tasks.sync_tasks.sync_market_news",
-        "schedule": crontab(hour=8, minute=0),
+        "schedule": crontab(
+            hour=settings.sync_market_news_morning_hour,
+            minute=settings.sync_market_news_morning_minute,
+        ),
         "args": (),
     },
-    # 每天晚 18:00 同步全市场新闻
+    # 晚间同步全市场新闻
     "evening-market-news-sync": {
         "task": "app.tasks.sync_tasks.sync_market_news",
-        "schedule": crontab(hour=18, minute=0),
+        "schedule": crontab(
+            hour=settings.sync_market_news_evening_hour,
+            minute=settings.sync_market_news_evening_minute,
+        ),
         "args": (),
     },
-    # 每天早 8:05 同步自选股新闻
+    # 早间同步自选股新闻
     "morning-watchlist-news-sync": {
         "task": "app.tasks.sync_tasks.sync_watchlist_news",
-        "schedule": crontab(hour=8, minute=5),
+        "schedule": crontab(
+            hour=settings.sync_watchlist_news_morning_hour,
+            minute=settings.sync_watchlist_news_morning_minute,
+        ),
         "args": (),
     },
-    # 每天晚 18:05 同步自选股新闻
+    # 晚间同步自选股新闻
     "evening-watchlist-news-sync": {
         "task": "app.tasks.sync_tasks.sync_watchlist_news",
-        "schedule": crontab(hour=18, minute=5),
+        "schedule": crontab(
+            hour=settings.sync_watchlist_news_evening_hour,
+            minute=settings.sync_watchlist_news_evening_minute,
+        ),
         "args": (),
     },
     # 每小时生成新闻向量
     "hourly-news-embeddings": {
         "task": "app.tasks.sync_tasks.generate_news_embeddings",
-        "schedule": crontab(minute=30),  # 每小时的第 30 分钟
+        "schedule": crontab(minute=settings.generate_embeddings_minute),
         "args": (),
     },
-    # 每日收盘后同步板块行情（16:30）
+    # 每日收盘后同步板块行情
     "daily-sector-sync": {
         "task": "app.tasks.sync_tasks.sync_sector_quotes",
-        "schedule": crontab(hour=16, minute=30),
+        "schedule": crontab(
+            hour=settings.sync_sector_quotes_hour,
+            minute=settings.sync_sector_quotes_minute,
+        ),
         "args": (),
     },
-    # 每周一凌晨 2:00 清理过期新闻
+    # 每周清理过期新闻
     "weekly-news-cleanup": {
         "task": "app.tasks.sync_tasks.cleanup_old_news",
-        "schedule": crontab(day_of_week=0, hour=2, minute=0),
+        "schedule": crontab(
+            day_of_week=settings.cleanup_news_day_of_week,
+            hour=settings.cleanup_news_hour,
+            minute=settings.cleanup_news_minute,
+        ),
         "args": (),
     },
 }

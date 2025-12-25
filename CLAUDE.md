@@ -393,19 +393,39 @@ embedding = await provider.generate_embedding(text)
 ## 配置文件
 
 ### 后端配置（环境变量）
+
+**基础服务配置**：
 - `POSTGRES_*` - 数据库配置
 - `REDIS_*` - Redis 配置
 - `CELERY_*` - Celery 配置
+
+**LLM 配置**：
 - `LLM_PROVIDER` - LLM 提供商选择（deepseek/openai/ollama）
 - `DEEPSEEK_API_KEY` / `OPENAI_API_KEY` - LLM API 密钥
+
+**向量服务配置**：
 - `EMBEDDING_PROVIDER` - 向量服务提供商（openai/siliconflow/ollama）
 - `EMBEDDING_*_API_KEY` - 各提供商的向量服务 API 密钥
+- `EMBEDDING_*_MODEL` - 向量模型名称
+- `EMBEDDING_*_DIMENSION` - 向量维度
+
+**数据同步配置**：
 - `NEWS_SYNC_MARKET_LIMIT` - 全市场新闻每次同步数量（默认 50）
 - `NEWS_SYNC_WATCHLIST_LIMIT_PER_STOCK` - 自选股新闻每只股票获取数量（默认 5）
 - `NEWS_SYNC_BATCH_INTERVAL` - 批量获取新闻时的批次间隔秒数（默认 0.5）
 - `EMBEDDING_BATCH_SIZE` - 向量生成批次大小（默认 100）
 - `NEWS_RETENTION_DAYS` - 新闻保留天数（默认 90）
 - `NEWS_CLEANUP_PROTECT_WATCHLIST` - 是否保护自选股新闻不被清理（默认 true）
+
+**Celery Beat 调度配置**（所有时间使用 24 小时制）：
+- `SYNC_DAILY_QUOTES_HOUR/MINUTE` - 日线同步时间（默认 16:00）
+- `SYNC_WATCHLIST_QUOTES_MINUTE` - 自选股行情同步分钟（默认每小时整点）
+- `SYNC_FINANCIAL_DAY_OF_WEEK/HOUR/MINUTE` - 财报同步时间（默认周六 20:00）
+- `SYNC_MARKET_NEWS_MORNING/EVENING_HOUR/MINUTE` - 市场新闻同步时间（默认 8:00 和 18:00）
+- `SYNC_WATCHLIST_NEWS_MORNING/EVENING_HOUR/MINUTE` - 自选股新闻同步时间（默认 8:05 和 18:05）
+- `GENERATE_EMBEDDINGS_MINUTE` - 向量生成分钟（默认每小时第 30 分钟）
+- `SYNC_SECTOR_QUOTES_HOUR/MINUTE` - 板块行情同步时间（默认 16:30）
+- `CLEANUP_NEWS_DAY_OF_WEEK/HOUR/MINUTE` - 新闻清理时间（默认周一凌晨 2:00）
 
 完整配置参考：`backend/app/config.py`（Pydantic Settings）
 

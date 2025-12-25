@@ -106,6 +106,45 @@ class Settings(BaseSettings):
         default=True, description="是否保护自选股相关的新闻"
     )
 
+    # ==================== Celery Beat 调度配置 ====================
+    # 每日日线同步（收盘后）
+    sync_daily_quotes_hour: int = Field(default=16, description="日线同步小时（24小时制）")
+    sync_daily_quotes_minute: int = Field(default=0, description="日线同步分钟")
+
+    # 自选股行情同步（每小时）
+    sync_watchlist_quotes_minute: int = Field(default=0, description="自选股行情同步分钟")
+
+    # 财务报表同步（每周六）
+    sync_financial_day_of_week: int = Field(
+        default=6, description="财报同步星期几（0=周一，6=周日）"
+    )
+    sync_financial_hour: int = Field(default=20, description="财报同步小时")
+    sync_financial_minute: int = Field(default=0, description="财报同步分钟")
+
+    # 全市场新闻同步（每天两次）
+    sync_market_news_morning_hour: int = Field(default=8, description="早间市场新闻同步小时")
+    sync_market_news_morning_minute: int = Field(default=0, description="早间市场新闻同步分钟")
+    sync_market_news_evening_hour: int = Field(default=18, description="晚间市场新闻同步小时")
+    sync_market_news_evening_minute: int = Field(default=0, description="晚间市场新闻同步分钟")
+
+    # 自选股新闻同步（每天两次）
+    sync_watchlist_news_morning_hour: int = Field(default=8, description="早间自选股新闻同步小时")
+    sync_watchlist_news_morning_minute: int = Field(default=5, description="早间自选股新闻同步分钟")
+    sync_watchlist_news_evening_hour: int = Field(default=18, description="晚间自选股新闻同步小时")
+    sync_watchlist_news_evening_minute: int = Field(default=5, description="晚间自选股新闻同步分钟")
+
+    # 新闻向量生成（每小时）
+    generate_embeddings_minute: int = Field(default=30, description="新闻向量生成分钟（每小时）")
+
+    # 板块行情同步（收盘后）
+    sync_sector_quotes_hour: int = Field(default=16, description="板块行情同步小时")
+    sync_sector_quotes_minute: int = Field(default=30, description="板块行情同步分钟")
+
+    # 新闻清理（每周一凌晨）
+    cleanup_news_day_of_week: int = Field(default=0, description="新闻清理星期几（0=周一）")
+    cleanup_news_hour: int = Field(default=2, description="新闻清理小时")
+    cleanup_news_minute: int = Field(default=0, description="新闻清理分钟")
+
     # 向量服务配置
     embedding_provider: Literal["openai", "siliconflow", "ollama"] = Field(
         default="openai", description="向量服务提供商"
