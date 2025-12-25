@@ -88,9 +88,88 @@ class Settings(BaseSettings):
     akshare_rate_limit_window: int = Field(default=1, description="限频时间窗口(秒)")
     sync_batch_size: int = Field(default=100, description="数据同步批量大小")
 
+    # 新闻同步配置
+    news_sync_market_limit: int = Field(default=50, description="全市场新闻每次同步数量")
+    news_sync_watchlist_limit_per_stock: int = Field(
+        default=5, description="自选股新闻：每只股票获取的新闻数量"
+    )
+    news_sync_batch_interval: float = Field(
+        default=0.5, description="批量获取新闻时的批次间隔（秒）"
+    )
+
+    # 向量生成配置
+    embedding_batch_size: int = Field(default=100, description="向量生成的批次大小")
+
+    # 数据清理配置
+    news_retention_days: int = Field(default=90, description="新闻保留天数")
+    news_cleanup_protect_watchlist: bool = Field(
+        default=True, description="是否保护自选股相关的新闻"
+    )
+
+    # 向量服务配置
+    embedding_provider: Literal["openai", "siliconflow", "ollama"] = Field(
+        default="openai", description="向量服务提供商"
+    )
+
+    # OpenAI 向量配置
+    embedding_openai_api_key: str = Field(default="", description="OpenAI API Key（向量服务专用）")
+    embedding_openai_model: str = Field(
+        default="text-embedding-3-small", description="OpenAI 向量模型"
+    )
+    embedding_openai_dimension: int = Field(default=1536, description="OpenAI 向量维度")
+
+    # SiliconFlow 向量配置
+    embedding_siliconflow_api_key: str = Field(default="", description="SiliconFlow API Key")
+    embedding_siliconflow_base_url: str = Field(
+        default="https://api.siliconflow.cn/v1", description="SiliconFlow API 地址"
+    )
+    embedding_siliconflow_model: str = Field(
+        default="BAAI/bge-large-zh-v1.5", description="SiliconFlow 向量模型"
+    )
+    embedding_siliconflow_dimension: int = Field(
+        default=1024, description="SiliconFlow 向量维度"
+    )
+
+    # Ollama 向量配置
+    embedding_ollama_base_url: str = Field(
+        default="http://localhost:11434", description="Ollama API 地址"
+    )
+    embedding_ollama_model: str = Field(default="nomic-embed-text", description="Ollama 向量模型")
+    embedding_ollama_dimension: int = Field(default=768, description="Ollama 向量维度")
+
     # 日志配置
     log_level: str = "INFO"
     log_format: Literal["json", "console"] = "json"
+
+    @property
+    def embedding_api_key(self) -> str:
+        """根据当前提供商返回对应的 API Key"""
+        provider_key_map = {
+            "openai": self.embedding_openai_api_key,
+            "siliconflow": self.embedding_siliconflow_api_key,
+            "ollama": "",
+        }
+        return provider_key_map.get(self.embedding_provider, "")
+
+    @property
+    def embedding_model(self) -> str:
+        """根据当前提供商返回对应的模型名称"""
+        provider_model_map = {
+            "openai": self.embedding_openai_model,
+            "siliconflow": self.embedding_siliconflow_model,
+            "ollama": self.embedding_ollama_model,
+        }
+        return provider_model_map.get(self.embedding_provider, "")
+
+    @property
+    def embedding_dimension(self) -> int:
+        """根据当前提供商返回对应的向量维度"""
+        provider_dim_map = {
+            "openai": self.embedding_openai_dimension,
+            "siliconflow": self.embedding_siliconflow_dimension,
+            "ollama": self.embedding_ollama_dimension,
+        }
+        return provider_dim_map.get(self.embedding_provider, 1536)
 
 
 @lru_cache

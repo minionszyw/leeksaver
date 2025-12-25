@@ -130,11 +130,12 @@ def sync_market_news(self):
 
     每天执行 2 次（早 8:00 和晚 18:00）
     """
+    from app.config import settings
     from app.sync.news_syncer import news_syncer
 
     logger.info("开始同步全市场新闻")
     try:
-        result = run_async(news_syncer.sync_market_news(limit=50))
+        result = run_async(news_syncer.sync_market_news(limit=settings.news_sync_market_limit))
         logger.info("全市场新闻同步完成", **result)
         return {"status": "success", **result}
     except Exception as e:
@@ -143,26 +144,27 @@ def sync_market_news(self):
 
 
 @shared_task(bind=True, max_retries=3)
-def sync_hot_stocks_news(self):
+def sync_watchlist_news(self):
     """
-    同步热门股票新闻
+    同步自选股新闻
 
-    每天执行 2 次（早 8:00 和晚 18:00）
+    优先同步用户自选股的相关新闻，如果没有自选股则降级为全市场新闻
+    每天执行 2 次（早 8:05 和晚 18:05）
     """
+    from app.config import settings
     from app.sync.news_syncer import news_syncer
 
-    logger.info("开始同步热门股票新闻")
+    logger.info("开始同步自选股新闻")
     try:
         result = run_async(
-            news_syncer.sync_hot_stocks_news(
-                top_n=50,
-                limit_per_stock=5,
+            news_syncer.sync_watchlist_news(
+                limit_per_stock=settings.news_sync_watchlist_limit_per_stock
             )
         )
-        logger.info("热门股票新闻同步完成", **result)
+        logger.info("自选股新闻同步完成", **result)
         return {"status": "success", **result}
     except Exception as e:
-        logger.error("热门股票新闻同步失败", error=str(e))
+        logger.error("自选股新闻同步失败", error=str(e))
         raise self.retry(exc=e, countdown=300)
 
 
@@ -173,15 +175,37 @@ def generate_news_embeddings(self):
 
     每小时执行一次，为新入库的新闻生成向量
     """
+    from app.config import settings
     from app.sync.news_syncer import news_syncer
 
     logger.info("开始生成新闻向量")
     try:
-        result = run_async(news_syncer.generate_embeddings(batch_size=100))
+        result = run_async(news_syncer.generate_embeddings(batch_size=settings.embedding_batch_size))
         logger.info("新闻向量生成完成", **result)
         return {"status": "success", **result}
     except Exception as e:
         logger.error("新闻向量生成失败", error=str(e))
+        raise self.retry(exc=e, countdown=300)
+
+
+@shared_task(bind=True, max_retries=3)
+def cleanup_old_news(self):
+    """
+    清理过期新闻数据
+
+    策略：
+    1. 删除超过保留期的新闻
+    2. 保护自选股相关的新闻（如果配置启用）
+    """
+    from app.sync.news_cleaner import news_cleaner
+
+    logger.info("开始清理过期新闻")
+    try:
+        result = run_async(news_cleaner.cleanup_old_news())
+        logger.info("新闻清理完成", **result)
+        return {"status": "success", **result}
+    except Exception as e:
+        logger.error("新闻清理失败", error=str(e))
         raise self.retry(exc=e, countdown=300)
 
 

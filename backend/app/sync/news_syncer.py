@@ -13,7 +13,7 @@ from app.core.logging import get_logger
 from app.datasources.news_adapter import news_adapter
 from app.models.news import NewsArticle
 from app.repositories.news_repository import NewsRepository
-from app.repositories.stock_repository import StockRepository
+from app.repositories.stock_repository import StockRepository, WatchlistRepository
 from app.services.embedding_service import embedding_service
 
 logger = get_logger(__name__)
@@ -22,16 +22,19 @@ logger = get_logger(__name__)
 class NewsSyncer:
     """新闻数据同步器"""
 
-    async def sync_market_news(self, limit: int = 50) -> dict:
+    async def sync_market_news(self, limit: int | None = None) -> dict:
         """
         同步全市场新闻
 
         Args:
-            limit: 获取数量
+            limit: 获取数量（None 则从配置读取）
 
         Returns:
             同步统计信息
         """
+        from app.config import settings
+
+        limit = limit or settings.news_sync_market_limit
         logger.info("开始同步全市场新闻", limit=limit)
 
         try:
@@ -98,44 +101,40 @@ class NewsSyncer:
             logger.error("全市场新闻同步失败", error=str(e))
             raise
 
-    async def sync_hot_stocks_news(
+    async def sync_watchlist_news(
         self,
-        top_n: int = 50,
-        limit_per_stock: int = 5,
+        limit_per_stock: int | None = None,
     ) -> dict:
         """
-        同步热门股票新闻
+        同步自选股新闻
+
+        优先同步用户自选股的相关新闻
+        如果没有自选股，降级为全市场新闻同步
 
         Args:
-            top_n: 选择前 N 只活跃股票
-            limit_per_stock: 每只股票获取的新闻数量
+            limit_per_stock: 每只股票获取的新闻数量（None 则从配置读取）
 
         Returns:
             同步统计信息
         """
-        logger.info(
-            "开始同步热门股票新闻",
-            top_n=top_n,
-            limit_per_stock=limit_per_stock,
-        )
+        from app.config import settings
+
+        limit_per_stock = limit_per_stock or settings.news_sync_watchlist_limit_per_stock
+
+        logger.info("开始同步自选股新闻", limit_per_stock=limit_per_stock)
 
         try:
-            # 获取活跃股票列表（排除 ETF）
+            # 获取自选股代码列表
             async with get_db_session() as session:
-                stock_repo = StockRepository(session)
-                all_stocks = await stock_repo.get_all(active_only=True)
-                # 只选择股票（排除 ETF）
-                stocks = [s for s in all_stocks if s.asset_type == "stock"]
+                watchlist_repo = WatchlistRepository(session)
+                stock_codes = await watchlist_repo.get_codes()
 
-            if not stocks:
-                logger.warning("无活跃股票")
-                return {"status": "no_stocks", "synced": 0}
+            # 如果没有自选股，降级为全市场新闻同步
+            if not stock_codes:
+                logger.warning("没有自选股，降级为全市场新闻同步")
+                return await self.sync_market_news()
 
-            # 选择前 N 只股票（简化：按代码排序，实际可按市值或成交量排序）
-            hot_stocks = stocks[:top_n]
-            stock_codes = [stock.code for stock in hot_stocks]
-
-            logger.info("选择热门股票", count=len(stock_codes))
+            logger.info("获取到自选股列表", count=len(stock_codes))
 
             # 批量获取新闻
             news_df = await news_adapter.get_batch_stock_news(
@@ -144,7 +143,7 @@ class NewsSyncer:
             )
 
             if news_df is None or len(news_df) == 0:
-                logger.warning("热门股票新闻数据为空")
+                logger.warning("自选股新闻数据为空")
                 return {"status": "no_data", "synced": 0}
 
             # 转换为新闻对象并入库
@@ -182,10 +181,11 @@ class NewsSyncer:
                     await session.commit()
 
             logger.info(
-                "热门股票新闻同步完成",
+                "自选股新闻同步完成",
                 synced=synced_count,
                 skipped=skipped_count,
                 total=len(news_df),
+                watchlist_count=len(stock_codes),
             )
 
             # 异步生成向量
@@ -197,22 +197,26 @@ class NewsSyncer:
                 "synced": synced_count,
                 "skipped": skipped_count,
                 "total": len(news_df),
+                "watchlist_count": len(stock_codes),
             }
 
         except Exception as e:
-            logger.error("热门股票新闻同步失败", error=str(e))
+            logger.error("自选股新闻同步失败", error=str(e))
             raise
 
-    async def generate_embeddings(self, batch_size: int = 50) -> dict:
+    async def generate_embeddings(self, batch_size: int | None = None) -> dict:
         """
         为尚未生成向量的新闻生成向量
 
         Args:
-            batch_size: 批次大小
+            batch_size: 批次大小（None 则从配置读取）
 
         Returns:
             生成统计信息
         """
+        from app.config import settings
+
+        batch_size = batch_size or settings.embedding_batch_size
         logger.info("开始生成新闻向量", batch_size=batch_size)
 
         try:
@@ -234,10 +238,10 @@ class NewsSyncer:
                     for article in articles
                 ]
 
-                # 批量生成向量
+                # 批量生成向量（传递 batch_size 给提供商）
                 embeddings = await embedding_service.generate_embeddings_batch(
                     texts,
-                    batch_size=20,  # OpenAI 批次限制
+                    batch_size=batch_size,
                 )
 
                 # 更新数据库
@@ -261,7 +265,7 @@ class NewsSyncer:
         """异步生成向量（后台任务）"""
         try:
             await asyncio.sleep(5)  # 延迟 5 秒启动
-            await self.generate_embeddings(batch_size=100)
+            await self.generate_embeddings()  # 使用配置的默认值
         except Exception as e:
             logger.error("异步生成向量失败", error=str(e))
 

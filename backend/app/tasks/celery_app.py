@@ -74,15 +74,15 @@ celery_app.conf.beat_schedule = {
         "schedule": crontab(hour=18, minute=0),
         "args": (),
     },
-    # 每天早 8:00 同步热门股票新闻
-    "morning-hot-stocks-news-sync": {
-        "task": "app.tasks.sync_tasks.sync_hot_stocks_news",
+    # 每天早 8:05 同步自选股新闻
+    "morning-watchlist-news-sync": {
+        "task": "app.tasks.sync_tasks.sync_watchlist_news",
         "schedule": crontab(hour=8, minute=5),
         "args": (),
     },
-    # 每天晚 18:00 同步热门股票新闻
-    "evening-hot-stocks-news-sync": {
-        "task": "app.tasks.sync_tasks.sync_hot_stocks_news",
+    # 每天晚 18:05 同步自选股新闻
+    "evening-watchlist-news-sync": {
+        "task": "app.tasks.sync_tasks.sync_watchlist_news",
         "schedule": crontab(hour=18, minute=5),
         "args": (),
     },
@@ -96,6 +96,12 @@ celery_app.conf.beat_schedule = {
     "daily-sector-sync": {
         "task": "app.tasks.sync_tasks.sync_sector_quotes",
         "schedule": crontab(hour=16, minute=30),
+        "args": (),
+    },
+    # 每周一凌晨 2:00 清理过期新闻
+    "weekly-news-cleanup": {
+        "task": "app.tasks.sync_tasks.cleanup_old_news",
+        "schedule": crontab(day_of_week=0, hour=2, minute=0),
         "args": (),
     },
 }

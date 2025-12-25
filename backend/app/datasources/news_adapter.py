@@ -184,8 +184,10 @@ class NewsAdapter:
                 if news_df is not None and len(news_df) > 0:
                     all_news.append(news_df)
 
-                # 批次间休息，避免超频
-                await asyncio.sleep(0.5)
+                # 批次间休息，避免超频（从配置读取间隔）
+                from app.config import settings
+
+                await asyncio.sleep(settings.news_sync_batch_interval)
 
             except Exception as e:
                 logger.warning("获取股票新闻失败", code=code, error=str(e))

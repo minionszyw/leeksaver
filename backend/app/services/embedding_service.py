@@ -1,35 +1,49 @@
 """
-文本向量化服务
+文本向量化服务（统一入口）
 
-使用 OpenAI Embeddings API 将文本转换为向量，支持语义检索
+内部使用工厂模式，根据配置动态选择向量提供商（OpenAI/SiliconFlow/Ollama）
+保持向后兼容性，支持语义检索
 """
 
-import asyncio
 from typing import List
 
-import openai
-from sqlalchemy import select, text
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import settings
 from app.core.logging import get_logger
 from app.models.news import NewsArticle
+from app.services.embedding.factory import get_embedding_provider
 
 logger = get_logger(__name__)
 
 
 class EmbeddingService:
     """
-    文本向量化服务
+    文本向量化服务（统一入口）
 
-    使用 OpenAI text-embedding-3-small 模型生成 1536 维向量
+    内部使用工厂模式，根据配置动态选择提供商
     """
 
     def __init__(self):
-        """初始化 OpenAI 客户端"""
-        self.client = openai.AsyncOpenAI(api_key=settings.openai_api_key)
-        self.model = "text-embedding-3-small"
-        self.dimension = 1536
+        """初始化（延迟创建提供商）"""
+        self._provider = None
+
+    @property
+    def provider(self):
+        """获取当前提供商（懒加载）"""
+        if self._provider is None:
+            self._provider = get_embedding_provider()
+        return self._provider
+
+    @property
+    def model(self) -> str:
+        """当前模型名称"""
+        return self.provider.model_name
+
+    @property
+    def dimension(self) -> int:
+        """当前向量维度"""
+        return self.provider.dimension
 
     async def generate_embedding(self, text: str) -> List[float]:
         """
@@ -39,30 +53,9 @@ class EmbeddingService:
             text: 输入文本
 
         Returns:
-            1536 维向量
+            向量
         """
-        if not text or not text.strip():
-            logger.warning("文本为空，返回零向量")
-            return [0.0] * self.dimension
-
-        try:
-            # 截断过长文本（OpenAI 限制：8191 tokens）
-            # 1 token ≈ 4 characters，保守估计取前 20000 字符
-            text = text[:20000]
-
-            # 调用 OpenAI API
-            response = await self.client.embeddings.create(
-                input=text,
-                model=self.model,
-            )
-
-            embedding = response.data[0].embedding
-            logger.debug("生成向量成功", text_length=len(text), dim=len(embedding))
-            return embedding
-
-        except Exception as e:
-            logger.error("生成向量失败", error=str(e), text_length=len(text))
-            raise
+        return await self.provider.generate_embedding(text)
 
     async def generate_embeddings_batch(
         self,
@@ -74,48 +67,12 @@ class EmbeddingService:
 
         Args:
             texts: 文本列表
-            batch_size: 批次大小（OpenAI 限制：2048 个文本/批次）
+            batch_size: 批次大小（传递给提供商）
 
         Returns:
             向量列表
         """
-        if not texts:
-            return []
-
-        logger.info("批量生成向量", count=len(texts), batch_size=batch_size)
-
-        all_embeddings = []
-
-        # 分批处理
-        for i in range(0, len(texts), batch_size):
-            batch = texts[i : i + batch_size]
-            logger.debug("处理批次", batch_index=i // batch_size, batch_size=len(batch))
-
-            try:
-                # 清理空文本
-                processed_batch = [text[:20000] if text else "" for text in batch]
-
-                # 调用 OpenAI API
-                response = await self.client.embeddings.create(
-                    input=processed_batch,
-                    model=self.model,
-                )
-
-                # 提取向量
-                batch_embeddings = [item.embedding for item in response.data]
-                all_embeddings.extend(batch_embeddings)
-
-                # 批次间休息（避免超频）
-                if i + batch_size < len(texts):
-                    await asyncio.sleep(0.5)
-
-            except Exception as e:
-                logger.error("批次处理失败", batch_index=i // batch_size, error=str(e))
-                # 失败时填充零向量
-                all_embeddings.extend([[0.0] * self.dimension] * len(batch))
-
-        logger.info("批量生成向量完成", total=len(all_embeddings))
-        return all_embeddings
+        return await self.provider.generate_embeddings_batch(texts, batch_size)
 
     async def search_similar_news(
         self,
