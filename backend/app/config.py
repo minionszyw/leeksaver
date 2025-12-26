@@ -7,7 +7,7 @@ LeekSaver 配置管理模块
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field, PostgresDsn, RedisDsn
+from pydantic import Field, PostgresDsn, RedisDsn, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -106,84 +106,54 @@ class Settings(BaseSettings):
         default=True, description="是否保护自选股相关的新闻"
     )
 
-    # ==================== Celery Beat 调度配置 ====================
-    # 每日日线同步（收盘后）
-    sync_daily_quotes_hour: int = Field(default=16, description="日线同步小时（24小时制）")
-    sync_daily_quotes_minute: int = Field(default=0, description="日线同步分钟")
+    # ==================== 分层调度策略配置 ====================
 
-    # 自选股行情同步（每小时）
-    sync_watchlist_quotes_minute: int = Field(default=0, description="自选股行情同步分钟")
+    # L1 - 日更组：收盘后统一同步时间（HH:MM 格式）
+    sync_l1_daily_time: str = Field(
+        default="17:30",
+        description="L1 日更任务统一执行时间（24小时制，格式：HH:MM）",
+    )
 
-    # 财务报表同步（每周六）
+    # L2 - 日内组：高频更新间隔（秒）
+    sync_l2_interval_seconds: int = Field(
+        default=300,
+        description="L2 日内任务更新间隔（秒，推荐 300=5分钟）",
+        ge=60,  # 最小 1 分钟
+        le=3600,  # 最大 1 小时
+    )
+
+    # L2 任务错开间隔（秒）
+    sync_l2_task_offset_seconds: int = Field(
+        default=120,
+        description="L2 任务错开执行的时间间隔（秒，推荐 120=2分钟）",
+        ge=0,
+        le=300,
+    )
+
+    # L3 - 按需组：实时缓存时间（秒）
+    realtime_cache_ttl: int = Field(
+        default=10,
+        description="L3 按需查询的缓存时间（秒）",
+        ge=1,
+        le=300,
+    )
+
+    # ==================== 特殊任务配置 ====================
+
+    # 财务报表同步（每周六 20:00）
     sync_financial_day_of_week: int = Field(
         default=6, description="财报同步星期几（0=周一，6=周日）"
     )
     sync_financial_hour: int = Field(default=20, description="财报同步小时")
     sync_financial_minute: int = Field(default=0, description="财报同步分钟")
 
-    # 全市场新闻同步（每天两次）
-    sync_market_news_morning_hour: int = Field(default=8, description="早间市场新闻同步小时")
-    sync_market_news_morning_minute: int = Field(default=0, description="早间市场新闻同步分钟")
-    sync_market_news_evening_hour: int = Field(default=18, description="晚间市场新闻同步小时")
-    sync_market_news_evening_minute: int = Field(default=0, description="晚间市场新闻同步分钟")
-
-    # 自选股新闻同步（每天两次）
-    sync_watchlist_news_morning_hour: int = Field(default=8, description="早间自选股新闻同步小时")
-    sync_watchlist_news_morning_minute: int = Field(default=5, description="早间自选股新闻同步分钟")
-    sync_watchlist_news_evening_hour: int = Field(default=18, description="晚间自选股新闻同步小时")
-    sync_watchlist_news_evening_minute: int = Field(default=5, description="晚间自选股新闻同步分钟")
-
-    # 新闻向量生成（每小时）
-    generate_embeddings_minute: int = Field(default=30, description="新闻向量生成分钟（每小时）")
-
-    # 板块行情同步（收盘后）
-    sync_sector_quotes_hour: int = Field(default=16, description="板块行情同步小时")
-    sync_sector_quotes_minute: int = Field(default=30, description="板块行情同步分钟")
-
-    # 新闻清理（每周一凌晨）
+    # 新闻清理（每周一 02:00）
     cleanup_news_day_of_week: int = Field(default=0, description="新闻清理星期几（0=周一）")
     cleanup_news_hour: int = Field(default=2, description="新闻清理小时")
     cleanup_news_minute: int = Field(default=0, description="新闻清理分钟")
 
-    # ==================== 新增数据同步配置 ====================
+    # ==================== 批量处理配置 ====================
 
-    # 自选股实时同步（interval 模式）
-    sync_watchlist_interval_seconds: int = Field(
-        default=60, description="自选股行情同步间隔（秒）- 交易时段"
-    )
-    sync_watchlist_off_hours_interval: int = Field(
-        default=3600, description="自选股行情同步间隔（秒）- 非交易时段"
-    )
-
-    # 北向资金同步
-    sync_northbound_flow_hour: int = Field(default=16, description="北向资金同步小时")
-    sync_northbound_flow_minute: int = Field(default=30, description="北向资金同步分钟")
-
-    # 个股资金流向同步
-    sync_fund_flow_hour: int = Field(default=16, description="个股资金同步小时")
-    sync_fund_flow_minute: int = Field(default=35, description="个股资金同步分钟")
-
-    # 龙虎榜同步
-    sync_dragon_tiger_hour: int = Field(default=18, description="龙虎榜同步小时")
-    sync_dragon_tiger_minute: int = Field(default=0, description="龙虎榜同步分钟")
-
-    # 两融数据同步
-    sync_margin_trade_hour: int = Field(default=18, description="两融同步小时")
-    sync_margin_trade_minute: int = Field(default=30, description="两融同步分钟")
-
-    # 市场情绪同步
-    sync_market_sentiment_hour: int = Field(default=16, description="市场情绪同步小时")
-    sync_market_sentiment_minute: int = Field(default=40, description="市场情绪同步分钟")
-
-    # 估值数据同步
-    sync_valuation_hour: int = Field(default=17, description="估值数据同步小时")
-    sync_valuation_minute: int = Field(default=0, description="估值数据同步分钟")
-
-    # 技术指标计算
-    calc_tech_indicators_hour: int = Field(default=17, description="技术指标计算小时")
-    calc_tech_indicators_minute: int = Field(default=30, description="技术指标计算分钟")
-
-    # 批量处理配置
     fund_flow_batch_size: int = Field(default=50, description="资金流向批量大小")
     valuation_batch_size: int = Field(default=100, description="估值数据批量大小")
     tech_indicator_batch_size: int = Field(default=100, description="技术指标批量大小")
@@ -225,6 +195,35 @@ class Settings(BaseSettings):
     # 日志配置
     log_level: str = "INFO"
     log_format: Literal["json", "console"] = "json"
+
+    # ==================== 配置验证器 ====================
+
+    @field_validator("sync_l1_daily_time")
+    @classmethod
+    def validate_time_format(cls, v: str) -> str:
+        """验证时间格式 HH:MM"""
+        try:
+            hour, minute = v.split(":")
+            h, m = int(hour), int(minute)
+            if not (0 <= h <= 23 and 0 <= m <= 59):
+                raise ValueError("时间超出有效范围")
+            return v
+        except ValueError as e:
+            raise ValueError(f"时间格式必须为 HH:MM (24小时制): {e}")
+        except Exception:
+            raise ValueError("时间格式必须为 HH:MM (24小时制)")
+
+    # ==================== 属性方法 ====================
+
+    @property
+    def l1_schedule_hour(self) -> int:
+        """解析 L1 执行时间的小时部分"""
+        return int(self.sync_l1_daily_time.split(":")[0])
+
+    @property
+    def l1_schedule_minute(self) -> int:
+        """解析 L1 执行时间的分钟部分"""
+        return int(self.sync_l1_daily_time.split(":")[1])
 
     @property
     def embedding_api_key(self) -> str:

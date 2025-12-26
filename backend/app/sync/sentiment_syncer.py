@@ -37,24 +37,67 @@ class SentimentSyncer:
             async with get_db_session() as session:
                 market_repo = MarketDataRepository(session)
                 # 获取当日所有股票的行情数据
-                quotes = await market_repo.get_daily_quotes(
-                    code="*",  # 暂时这样处理，实际需要改进
-                    start_date=trade_date,
-                    end_date=trade_date,
-                )
+                quotes = await market_repo.get_market_quotes(trade_date=trade_date)
 
-            # 如果无法获取全市场数据，尝试获取涨停池来计算部分指标
+            # 如果没有行情数据，记录警告并返回
+            if not quotes:
+                logger.warning("未获取到全市场行情数据", trade_date=str(trade_date))
+                return {"status": "no_data", "trade_date": str(trade_date)}
+
+            # 转换为 Polars DataFrame 以便高效计算
+            quotes_data = [
+                {
+                    "code": q.code,
+                    "change_pct": float(q.change_pct) if q.change_pct else 0.0,
+                    "turnover_rate": float(q.turnover_rate) if q.turnover_rate else 0.0,
+                    "volume": q.volume if q.volume else 0,
+                    "amount": float(q.amount) if q.amount else 0.0,
+                }
+                for q in quotes
+            ]
+            df = pl.DataFrame(quotes_data)
+
+            # 计算涨跌统计
+            rising_count = len(df.filter(pl.col("change_pct") > 0))
+            falling_count = len(df.filter(pl.col("change_pct") < 0))
+            flat_count = len(df.filter(pl.col("change_pct") == 0))
+
+            # 计算涨跌比
+            advance_decline_ratio = Decimal(str(rising_count / falling_count)) if falling_count > 0 else None
+
+            # 计算换手率分布
+            turnover_gt_10_count = len(df.filter(pl.col("turnover_rate") > 10))
+            turnover_5_10_count = len(df.filter((pl.col("turnover_rate") >= 5) & (pl.col("turnover_rate") <= 10)))
+            turnover_lt_1_count = len(df.filter(pl.col("turnover_rate") < 1))
+
+            # 计算平均换手率
+            avg_turnover = df.select(pl.col("turnover_rate").mean()).item()
+            avg_turnover_rate = Decimal(str(avg_turnover)) if avg_turnover else None
+
+            # 计算市场总成交
+            total_volume = df.select(pl.col("volume").sum()).item()
+            total_amount_raw = df.select(pl.col("amount").sum()).item()
+            total_amount = Decimal(str(total_amount_raw / 100_000_000)) if total_amount_raw else None  # 转换为亿元
+
+            # 获取涨停池数据
             limit_up_df = await sentiment_adapter.get_limit_up_pool(trade_date)
             limit_down_df = await sentiment_adapter.get_limit_down_pool(trade_date)
 
             # 构建情绪数据
             sentiment_data = {
                 "trade_date": trade_date,
-                "rising_count": 0,
-                "falling_count": 0,
-                "flat_count": 0,
+                "rising_count": rising_count,
+                "falling_count": falling_count,
+                "flat_count": flat_count,
                 "limit_up_count": len(limit_up_df) if len(limit_up_df) > 0 else 0,
                 "limit_down_count": len(limit_down_df) if len(limit_down_df) > 0 else 0,
+                "advance_decline_ratio": advance_decline_ratio,
+                "turnover_gt_10_count": turnover_gt_10_count,
+                "turnover_5_10_count": turnover_5_10_count,
+                "turnover_lt_1_count": turnover_lt_1_count,
+                "avg_turnover_rate": avg_turnover_rate,
+                "total_volume": total_volume,
+                "total_amount": total_amount,
             }
 
             # 计算连板统计
@@ -78,7 +121,13 @@ class SentimentSyncer:
                 repo = MarketSentimentRepository(session)
                 await repo.upsert(sentiment_data)
 
-            logger.info("市场情绪同步完成", trade_date=str(trade_date))
+            logger.info(
+                "市场情绪同步完成",
+                trade_date=str(trade_date),
+                rising=rising_count,
+                falling=falling_count,
+                limit_up=sentiment_data["limit_up_count"],
+            )
             return {"status": "success", "trade_date": str(trade_date)}
 
         except Exception as e:

@@ -144,3 +144,20 @@ class MarketDataRepository:
             max_age_days += 2
 
         return days_diff <= max_age_days
+
+    async def get_market_quotes(
+        self,
+        trade_date: date,
+    ) -> Sequence[DailyQuote]:
+        """
+        获取指定日期全市场的日线行情
+
+        Args:
+            trade_date: 交易日期
+
+        Returns:
+            该交易日所有股票的行情数据
+        """
+        query = select(DailyQuote).where(DailyQuote.trade_date == trade_date)
+        result = await self.session.execute(query)
+        return result.scalars().all()
