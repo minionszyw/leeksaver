@@ -20,6 +20,7 @@ celery_app = Celery(
     backend=settings.celery_result_backend,
     include=[
         "app.tasks.sync_tasks",
+        "app.tasks.monitoring_tasks",  # 监控任务
     ],
 )
 
@@ -94,6 +95,12 @@ def generate_beat_schedule() -> dict:
                     day_of_week=settings.cleanup_news_day_of_week,
                     hour=settings.cleanup_news_hour,
                     minute=settings.cleanup_news_minute,
+                )
+            elif "health" in task_meta.name:
+                # 数据健康巡检（每天 09:00）
+                schedule_config = crontab(
+                    hour=settings.health_check_hour,
+                    minute=settings.health_check_minute,
                 )
 
         # 添加到 beat_schedule

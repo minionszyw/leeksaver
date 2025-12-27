@@ -152,6 +152,10 @@ class Settings(BaseSettings):
     cleanup_news_hour: int = Field(default=2, description="新闻清理小时")
     cleanup_news_minute: int = Field(default=0, description="新闻清理分钟")
 
+    # 数据健康巡检（每天 09:00）
+    health_check_hour: int = Field(default=9, description="数据健康巡检小时")
+    health_check_minute: int = Field(default=0, description="数据健康巡检分钟")
+
     # ==================== 批量处理配置 ====================
 
     fund_flow_batch_size: int = Field(default=50, description="资金流向批量大小")

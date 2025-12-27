@@ -12,6 +12,7 @@ import akshare as ak
 import polars as pl
 
 from app.core.logging import get_logger
+from app.core.cache import cached
 from app.datasources.rate_limiter import akshare_limiter
 
 logger = get_logger(__name__)
@@ -32,11 +33,19 @@ class ValuationAdapter:
         async with akshare_limiter:
             return await asyncio.to_thread(func, *args, **kwargs)
 
-    async def get_all_valuations(self, trade_date: date) -> pl.DataFrame:
+    @cached(ttl=300, key_prefix="valuation")
+    async def get_all_valuations(self, trade_date: date) -> dict:
         """
-        获取全市场估值数据
+        获取全市场估值数据（带缓存）
 
         使用 stock_zh_a_spot_em 接口获取实时行情（包含 PE、PB、市值）
+
+        性能优化：
+        - 缓存 5 分钟（避免重复调用 AkShare API）
+        - 返回值转为 dict 以支持 JSON 序列化
+
+        Returns:
+            包含 DataFrame 数据的字典 {"data": list[dict], "columns": list[str]}
         """
         logger.info("获取全市场估值数据", trade_date=str(trade_date))
 
@@ -74,7 +83,12 @@ class ValuationAdapter:
             )
 
             logger.info("获取全市场估值数据成功", count=len(result))
-            return result
+
+            # 转换为可序列化的字典格式（用于缓存）
+            return {
+                "data": result.to_dicts(),
+                "columns": result.columns,
+            }
 
         except Exception as e:
             logger.error("获取全市场估值数据失败", error=str(e))
@@ -83,14 +97,20 @@ class ValuationAdapter:
     async def get_stock_valuation(self, code: str, trade_date: date) -> dict | None:
         """
         获取单只股票的估值数据
+
+        性能优化：利用缓存的全市场数据，避免重复调用 API
         """
         logger.info("获取股票估值", code=code, trade_date=str(trade_date))
 
         try:
-            all_valuations = await self.get_all_valuations(trade_date)
+            # 获取缓存的全市场数据
+            all_valuations_dict = await self.get_all_valuations(trade_date)
 
-            if len(all_valuations) == 0:
+            if not all_valuations_dict or not all_valuations_dict["data"]:
                 return None
+
+            # 从缓存的字典恢复 DataFrame
+            all_valuations = pl.from_dicts(all_valuations_dict["data"])
 
             stock_data = all_valuations.filter(pl.col("code") == code)
 

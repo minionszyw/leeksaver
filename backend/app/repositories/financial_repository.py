@@ -9,13 +9,14 @@ from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.financial import FinancialStatement
+from app.repositories.base import BaseRepository
 
 
-class FinancialRepository:
+class FinancialRepository(BaseRepository[FinancialStatement]):
     """财务数据仓库"""
 
     def __init__(self, session: AsyncSession):
-        self.session = session
+        super().__init__(session, FinancialStatement)
 
     async def get_latest_statement(self, code: str) -> Optional[FinancialStatement]:
         """获取最新的财务报表"""
@@ -49,14 +50,24 @@ class FinancialRepository:
 
     async def upsert_many(self, statements: list[dict]) -> int:
         """
-        批量更新或插入 (使用 merge)
+        批量更新或插入（使用高性能 insert on_conflict）
+
+        性能提升：使用 BaseRepository.upsert_many() 替代逐行 merge
+        预期性能提升：10-50 倍（取决于数据量）
+
+        Args:
+            statements: 财务报表数据列表
+
+        Returns:
+            插入/更新的记录数
         """
-        # 注意：这里简单遍历 merge，对于大量数据可能需要优化
-        for data in statements:
-            # 转换为模型对象
-            # 确保日期类型正确
-            obj = FinancialStatement(**data)
-            await self.session.merge(obj)
-        
-        await self.session.flush()
-        return len(statements)
+        if not statements:
+            return 0
+
+        # 调用父类的高性能 upsert_many
+        # 财务报表的主键是 (code, end_date)
+        return await super().upsert_many(
+            records=statements,
+            conflict_columns=["code", "end_date"],
+            # update_columns=None 会自动更新所有非主键列
+        )

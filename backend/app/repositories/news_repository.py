@@ -12,15 +12,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
 from app.models.news import NewsArticle
+from app.repositories.base import BaseRepository
 
 logger = get_logger(__name__)
 
 
-class NewsRepository:
+class NewsRepository(BaseRepository[NewsArticle]):
     """新闻数据仓储"""
 
     def __init__(self, session: AsyncSession):
-        self.session = session
+        super().__init__(session, NewsArticle)
 
     async def get_by_url(self, url: str) -> Optional[NewsArticle]:
         """

@@ -381,6 +381,100 @@ class AkShareAdapter(DataSourceBase):
             logger.error("获取财务数据失败", code=code, error=str(e))
             raise
 
+    async def enrich_stock_list_with_metadata(
+        self, stock_df: pl.DataFrame
+    ) -> pl.DataFrame:
+        """
+        为股票列表补充元数据（行业、上市日期等）
+
+        策略:
+        - 使用 stock_info_sh_name_code 和 stock_info_sz_name_code 获取行业分类
+        - 如果 AkShare 接口不返回行业，字段保持 NULL
+
+        Args:
+            stock_df: 股票列表 DataFrame（需包含 code 列）
+
+        Returns:
+            补充了元数据的 DataFrame
+        """
+        logger.info("开始补充股票元数据")
+
+        try:
+            # 获取沪市 A 股行业分类
+            try:
+                sh_df = await self._run_sync(ak.stock_info_sh_name_code)
+                sh_industry = pl.from_pandas(sh_df)
+
+                # 检查是否有行业列
+                if "行业" in sh_industry.columns:
+                    sh_industry = sh_industry.select(
+                        [pl.col("证券代码").alias("code"), pl.col("行业").alias("industry")]
+                    )
+                else:
+                    logger.warning("沪市数据不包含行业字段")
+                    sh_industry = pl.DataFrame(
+                        {"code": [], "industry": []}, schema={"code": pl.Utf8, "industry": pl.Utf8}
+                    )
+            except Exception as e:
+                logger.warning(f"获取沪市行业分类失败: {e}")
+                sh_industry = pl.DataFrame(
+                    {"code": [], "industry": []}, schema={"code": pl.Utf8, "industry": pl.Utf8}
+                )
+
+            # 获取深市 A 股行业分类
+            try:
+                sz_df = await self._run_sync(ak.stock_info_sz_name_code)
+                sz_industry = pl.from_pandas(sz_df)
+
+                # 检查是否有行业列
+                if "行业" in sz_industry.columns:
+                    sz_industry = sz_industry.select(
+                        [pl.col("A股代码").alias("code"), pl.col("行业大类").alias("industry")]
+                    )
+                else:
+                    logger.warning("深市数据不包含行业字段")
+                    sz_industry = pl.DataFrame(
+                        {"code": [], "industry": []}, schema={"code": pl.Utf8, "industry": pl.Utf8}
+                    )
+            except Exception as e:
+                logger.warning(f"获取深市行业分类失败: {e}")
+                sz_industry = pl.DataFrame(
+                    {"code": [], "industry": []}, schema={"code": pl.Utf8, "industry": pl.Utf8}
+                )
+
+            # 合并沪深行业数据
+            if len(sh_industry) > 0 or len(sz_industry) > 0:
+                industry_df = pl.concat([sh_industry, sz_industry])
+
+                # 左连接补充行业信息
+                enriched = stock_df.join(industry_df, on="code", how="left")
+            else:
+                # 如果没有获取到任何行业数据，添加空的 industry 列
+                enriched = stock_df.with_columns(
+                    pl.lit(None, dtype=pl.Utf8).alias("industry")
+                )
+
+            # 添加 list_date 列（暂时为 NULL，后续可通过其他接口补充）
+            enriched = enriched.with_columns(pl.lit(None, dtype=pl.Date).alias("list_date"))
+
+            logger.info(
+                "股票元数据补充完成",
+                total=len(enriched),
+                with_industry=enriched.filter(pl.col("industry").is_not_null()).height,
+            )
+
+            return enriched
+
+        except Exception as e:
+            logger.error(f"补充股票元数据失败: {e}")
+            # 失败时至少添加空列，避免下游错误
+            return stock_df.with_columns(
+                [
+                    pl.lit(None, dtype=pl.Utf8).alias("industry"),
+                    pl.lit(None, dtype=pl.Date).alias("list_date"),
+                ]
+            )
+
     async def get_realtime_quote(self, code: str) -> dict[str, Any]:
         """
         获取实时行情

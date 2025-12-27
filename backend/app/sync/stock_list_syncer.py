@@ -40,9 +40,21 @@ class StockListSyncer:
             etf_df = await akshare_adapter.get_etf_list()
             stats["etfs"] = len(etf_df)
 
-            # 合并数据
+            # 补充股票元数据（行业、上市日期等）
+            logger.info("补充股票元数据...")
+            stock_df = await akshare_adapter.enrich_stock_list_with_metadata(stock_df)
+
+            # 为 ETF 添加相同的列结构（industry 和 list_date 设为 NULL）
             import polars as pl
 
+            etf_df = etf_df.with_columns(
+                [
+                    pl.lit(None, dtype=pl.Utf8).alias("industry"),
+                    pl.lit(None, dtype=pl.Date).alias("list_date"),
+                ]
+            )
+
+            # 合并数据
             all_df = pl.concat([stock_df, etf_df])
             stats["total"] = len(all_df)
 

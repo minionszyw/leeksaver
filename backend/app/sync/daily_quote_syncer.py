@@ -12,6 +12,8 @@ from app.core.logging import get_logger
 from app.datasources.akshare_adapter import akshare_adapter
 from app.repositories.stock_repository import StockRepository, WatchlistRepository
 from app.repositories.market_data_repository import MarketDataRepository
+from app.repositories.sync_error_repository import SyncErrorRepository
+from app.models.sync_error import SyncError
 
 logger = get_logger(__name__)
 
@@ -82,13 +84,20 @@ class DailyQuoteSyncer:
         self,
         codes: list[str],
         progress_callback: Callable[[int, int], None] | None = None,
+        max_concurrent: int = 10,
     ) -> dict:
         """
-        批量同步日线行情
+        批量同步日线行情（并发版本）
+
+        性能优化：
+        - 使用 asyncio.gather() 并发执行
+        - Semaphore 限制并发数避免触发限频
+        - 预期性能提升：10 倍（100 只股票从 2+ 分钟降至 15 秒）
 
         Args:
             codes: 股票代码列表
             progress_callback: 进度回调函数 (current, total)
+            max_concurrent: 最大并发数（默认 10）
 
         Returns:
             同步结果统计
@@ -101,33 +110,99 @@ class DailyQuoteSyncer:
             "records": 0,
         }
 
-        logger.info("开始批量同步日线行情", total=total)
+        logger.info("开始并发批量同步日线行情", total=total, max_concurrent=max_concurrent)
 
-        for i, code in enumerate(codes):
-            try:
-                count = await self.sync_single(code)
-                stats["records"] += count
-                stats["success"] += 1
-            except Exception as e:
-                stats["failed"] += 1
-                logger.warning("同步失败", code=code, error=str(e))
+        # 使用 Semaphore 限制并发数
+        semaphore = asyncio.Semaphore(max_concurrent)
+        completed = 0
+        success_codes = []
+        failed_codes = []
 
-            # 进度回调
-            if progress_callback:
-                progress_callback(i + 1, total)
+        async def sync_with_semaphore(code: str):
+            nonlocal completed
+            async with semaphore:
+                try:
+                    count = await self.sync_single(code)
+                    stats["records"] += count
+                    stats["success"] += 1
+                    success_codes.append(code)
+                except Exception as e:
+                    stats["failed"] += 1
+                    failed_codes.append(code)
 
-            # 每批次后短暂休息
-            if (i + 1) % self.batch_size == 0:
-                await asyncio.sleep(1)
+                    # 记录错误到数据库
+                    await self._record_sync_error(
+                        task_name="sync_daily_quotes",
+                        target_code=code,
+                        error=e
+                    )
+
+                    logger.warning("同步失败", code=code, error=str(e))
+                finally:
+                    completed += 1
+                    if progress_callback:
+                        progress_callback(completed, total)
+
+        # 并发执行所有任务
+        tasks = [sync_with_semaphore(code) for code in codes]
+        await asyncio.gather(*tasks)
+
+        # 标记成功同步的股票错误为已解决
+        if success_codes:
+            await self._mark_errors_resolved(success_codes)
 
         logger.info(
-            "批量同步日线行情完成",
+            "并发批量同步日线行情完成",
             success=stats["success"],
             failed=stats["failed"],
             records=stats["records"],
         )
 
         return stats
+
+    async def _record_sync_error(
+        self, task_name: str, target_code: str, error: Exception
+    ):
+        """
+        记录同步错误到数据库
+
+        Args:
+            task_name: 任务名称
+            target_code: 目标股票代码
+            error: 异常对象
+        """
+        try:
+            async with get_db_session() as session:
+                repo = SyncErrorRepository(session)
+                await repo.create_or_increment(
+                    task_name=task_name,
+                    target_code=target_code,
+                    error_type=type(error).__name__,
+                    error_message=str(error),
+                )
+                await session.commit()
+        except Exception as e:
+            logger.error(f"记录同步错误失败: {e}")
+
+    async def _mark_errors_resolved(self, target_codes: list[str]):
+        """
+        标记成功同步的股票错误为已解决
+
+        Args:
+            target_codes: 股票代码列表
+        """
+        try:
+            async with get_db_session() as session:
+                repo = SyncErrorRepository(session)
+                count = await repo.mark_batch_as_resolved(
+                    task_name="sync_daily_quotes",
+                    target_codes=target_codes
+                )
+                if count > 0:
+                    await session.commit()
+                    logger.info(f"标记 {count} 个错误为已解决")
+        except Exception as e:
+            logger.error(f"标记错误为已解决失败: {e}")
 
     async def sync_all(
         self,

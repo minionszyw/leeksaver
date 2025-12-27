@@ -21,6 +21,7 @@ from app.models.capital_flow import NorthboundFlow, StockFundFlow, DragonTiger, 
 from app.models.market_sentiment import MarketSentiment, LimitUpStock
 from app.models.valuation import DailyValuation
 from app.models.tech_indicator import TechIndicator
+from app.models.sync_error import SyncError
 
 # Alembic Config 对象
 config = context.config

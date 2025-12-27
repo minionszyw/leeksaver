@@ -10,16 +10,17 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.tech_indicator import TechIndicator
+from app.repositories.base import BaseRepository
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 
 
-class TechIndicatorRepository:
+class TechIndicatorRepository(BaseRepository[TechIndicator]):
     """技术指标数据访问层"""
 
     def __init__(self, session: AsyncSession):
-        self.session = session
+        super().__init__(session, TechIndicator)
 
     async def get_by_code_date(
         self,

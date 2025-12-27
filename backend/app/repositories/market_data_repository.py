@@ -10,16 +10,17 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.market_data import DailyQuote
+from app.repositories.base import BaseRepository
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 
 
-class MarketDataRepository:
+class MarketDataRepository(BaseRepository[DailyQuote]):
     """行情数据访问层"""
 
     def __init__(self, session: AsyncSession):
-        self.session = session
+        super().__init__(session, DailyQuote)
 
     async def get_daily_quotes(
         self,
@@ -71,35 +72,17 @@ class MarketDataRepository:
 
     async def upsert_many(self, quotes: list[dict]) -> int:
         """
-        批量插入或更新日线行情
+        批量插入或更新日线行情（使用高性能 BaseRepository）
 
         Args:
             quotes: 行情数据列表，每个元素包含 code, trade_date 等字段
         """
-        if not quotes:
-            return 0
-
-        stmt = insert(DailyQuote).values(quotes)
-        stmt = stmt.on_conflict_do_update(
-            index_elements=["code", "trade_date"],
-            set_={
-                "open": stmt.excluded.open,
-                "high": stmt.excluded.high,
-                "low": stmt.excluded.low,
-                "close": stmt.excluded.close,
-                "volume": stmt.excluded.volume,
-                "amount": stmt.excluded.amount,
-                "change": stmt.excluded.change,
-                "change_pct": stmt.excluded.change_pct,
-                "turnover_rate": stmt.excluded.turnover_rate,
-            },
+        count = await super().upsert_many(
+            records=quotes,
+            conflict_columns=["code", "trade_date"],
         )
-
-        await self.session.execute(stmt)
         await self.session.commit()
-
-        logger.debug("批量更新日线行情", count=len(quotes))
-        return len(quotes)
+        return count
 
     async def delete_old_data(self, before_date: date) -> int:
         """删除指定日期之前的数据"""

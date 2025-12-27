@@ -10,16 +10,17 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.stock import Stock, Watchlist
+from app.repositories.base import BaseRepository
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 
 
-class StockRepository:
+class StockRepository(BaseRepository[Stock]):
     """股票数据访问层"""
 
     def __init__(self, session: AsyncSession):
-        self.session = session
+        super().__init__(session, Stock)
 
     async def get_by_code(self, code: str) -> Stock | None:
         """根据代码获取股票"""
@@ -51,38 +52,18 @@ class StockRepository:
         return result.scalars().all()
 
     async def upsert_many(self, stocks: list[dict]) -> int:
-        """批量插入或更新股票"""
-        if not stocks:
-            return 0
+        """
+        批量插入或更新股票（使用高性能 BaseRepository）
 
-        # 分批插入，避免超过 PostgreSQL 参数限制 (32767)
-        # 每个股票约 6 个字段，所以每批 1000 条应该安全
-        batch_size = 1000
-        total_count = 0
-
-        for i in range(0, len(stocks), batch_size):
-            batch = stocks[i:i + batch_size]
-
-            stmt = insert(Stock).values(batch)
-            stmt = stmt.on_conflict_do_update(
-                index_elements=["code"],
-                set_={
-                    "name": stmt.excluded.name,
-                    "market": stmt.excluded.market,
-                    "asset_type": stmt.excluded.asset_type,
-                    "industry": stmt.excluded.industry,
-                    "is_active": stmt.excluded.is_active,
-                },
-            )
-
-            await self.session.execute(stmt)
-            total_count += len(batch)
-
-            logger.info("批量更新股票（批次）", batch=i//batch_size + 1, count=len(batch))
-
+        性能提升：使用统一的 BaseRepository.upsert_many()
+        """
+        count = await super().upsert_many(
+            records=stocks,
+            conflict_columns=["code"],
+            # update_columns 会自动推断所有非主键列
+        )
         await self.session.commit()
-        logger.info("批量更新股票完成", total=total_count)
-        return total_count
+        return count
 
     async def get_codes_by_market(self, market: str) -> list[str]:
         """获取指定市场的所有股票代码"""

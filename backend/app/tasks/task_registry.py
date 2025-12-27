@@ -180,6 +180,13 @@ SPECIAL_TASKS = [
         schedule_type=ScheduleType.CRONTAB,
         description="新闻清理（每周一 02:00）",
     ),
+    TaskMetadata(
+        name="daily-health-check",
+        task_path="app.tasks.monitoring_tasks.daily_health_check",
+        tier=TaskTier.SPECIAL,
+        schedule_type=ScheduleType.CRONTAB,
+        description="数据健康巡检（每天 09:00）",
+    ),
 ]
 
 

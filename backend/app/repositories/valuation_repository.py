@@ -10,16 +10,17 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.valuation import DailyValuation
+from app.repositories.base import BaseRepository
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 
 
-class ValuationRepository:
+class ValuationRepository(BaseRepository[DailyValuation]):
     """估值数据访问层"""
 
     def __init__(self, session: AsyncSession):
-        self.session = session
+        super().__init__(session, DailyValuation)
 
     async def get_by_code_date(
         self,
