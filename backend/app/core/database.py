@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
     create_async_engine,
 )
+from sqlalchemy.pool import NullPool
 
 from app.config import settings
 from app.core.logging import get_logger
@@ -18,12 +19,11 @@ from app.core.logging import get_logger
 logger = get_logger(__name__)
 
 # 创建异步引擎
+# 注意：在 Celery 环境中使用 NullPool 避免 event loop 冲突
 engine = create_async_engine(
     settings.database_url,
     echo=settings.debug,
-    pool_pre_ping=True,
-    pool_size=5,
-    max_overflow=10,
+    poolclass=NullPool,  # 禁用连接池，避免 Celery 中的 event loop 问题
 )
 
 # 创建会话工厂

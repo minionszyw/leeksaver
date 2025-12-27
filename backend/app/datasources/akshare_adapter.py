@@ -26,7 +26,7 @@ class AkShareAdapter(DataSourceBase):
     """
 
     def __init__(self):
-        self._loop = asyncio.get_event_loop()
+        pass
 
     async def _run_sync(self, func, *args, **kwargs):
         """在线程池中运行同步函数"""

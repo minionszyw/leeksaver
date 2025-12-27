@@ -70,9 +70,9 @@ class BaseRepository(Generic[ModelType]):
         if not records:
             return 0
 
-        # 分批处理（避免超过 PostgreSQL 参数限制 65535）
-        # 每条记录约 10-20 个参数，保守设置批次大小为 5000
-        batch_size = 5000
+        # 分批处理（避免超过 PostgreSQL 参数限制 32767）
+        # 每条记录约 10 个参数，32767 / 10 ≈ 3276，保守设置 3000
+        batch_size = 3000
         total_count = 0
 
         for i in range(0, len(records), batch_size):
