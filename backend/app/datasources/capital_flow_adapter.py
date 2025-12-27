@@ -85,6 +85,61 @@ class CapitalFlowAdapter:
             logger.error("获取北向资金数据失败", error=str(e))
             raise
 
+    async def get_northbound_flow_history(self) -> pl.DataFrame:
+        """
+        获取北向资金历史数据
+
+        使用 stock_hsgt_hist_em 接口获取历史数据
+        """
+        logger.info("获取北向资金历史数据")
+
+        try:
+            # 获取沪股通历史
+            sh_df = await self._run_sync(ak.stock_hsgt_hist_em, symbol="沪股通")
+            # 获取深股通历史
+            sz_df = await self._run_sync(ak.stock_hsgt_hist_em, symbol="深股通")
+
+            if sh_df.empty and sz_df.empty:
+                logger.warning("北向资金历史数据为空")
+                return pl.DataFrame()
+
+            # 处理沪股通
+            sh_data = pl.from_pandas(sh_df).select(
+                pl.col("日期").str.to_date("%Y-%m-%d").alias("trade_date"),
+                pl.col("当日成交净买额").cast(pl.Float64).alias("sh_net_inflow"),
+            )
+
+            # 处理深股通
+            sz_data = pl.from_pandas(sz_df).select(
+                pl.col("日期").str.to_date("%Y-%m-%d").alias("trade_date"),
+                pl.col("当日成交净买额").cast(pl.Float64).alias("sz_net_inflow"),
+            )
+
+            # 合并数据 (outer join)
+            result = sh_data.join(sz_data, on="trade_date", how="outer")
+
+            # 填充 null 为 0
+            result = result.with_columns(
+                pl.col("sh_net_inflow").fill_null(0.0),
+                pl.col("sz_net_inflow").fill_null(0.0),
+            )
+
+            # 计算总净流入
+            result = result.with_columns(
+                (pl.col("sh_net_inflow") + pl.col("sz_net_inflow")).alias("total_net_inflow")
+            )
+
+            # 转换为 Decimal (为了保持一致性，但在 Polars 中通常用 Float 计算后再转，这里先保持 Float 或转 Object)
+            # 数据库层面通常接收 Decimal，这里先返回 Float 即可，Repository 层会处理
+            # 或者在这里转成 Decimal 对象 (Polars 对 Decimal 支持有限，最好由 Syncer/Repo 处理)
+            
+            logger.info("获取北向资金历史数据成功", count=len(result))
+            return result.sort("trade_date")
+
+        except Exception as e:
+            logger.error("获取北向资金历史数据失败", error=str(e))
+            raise
+
     async def get_stock_fund_flow_rank(
         self,
         indicator: str = "今日",

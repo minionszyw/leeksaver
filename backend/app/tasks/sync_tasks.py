@@ -294,13 +294,15 @@ def sync_margin_trade(self):
     同步两融数据
 
     每日收盘后执行，获取融资融券余额
+    注意：两融数据通常 T+1 披露，所以默认同步 T-1 日数据
     """
-    from datetime import date
+    from datetime import date, timedelta
     from app.sync.capital_flow_syncer import capital_flow_syncer
 
-    logger.info("开始同步两融数据")
+    target_date = date.today() - timedelta(days=1)
+    logger.info("开始同步两融数据", target_date=str(target_date))
     try:
-        result = run_async(capital_flow_syncer.sync_margin_trade(date.today()))
+        result = run_async(capital_flow_syncer.sync_margin_trade(target_date))
         logger.info("两融数据同步完成", **result)
         return {"status": "success", **result}
     except Exception as e:
@@ -308,15 +310,33 @@ def sync_margin_trade(self):
         raise self.retry(exc=e, countdown=300)
 
 
+@shared_task(bind=True, max_retries=3)
+def sync_northbound_history(self):
+    """
+    同步北向资金历史数据（回填用）
+    """
+    from app.sync.capital_flow_syncer import capital_flow_syncer
+
+    logger.info("开始同步北向资金历史")
+    try:
+        result = run_async(capital_flow_syncer.sync_northbound_history())
+        logger.info("北向资金历史同步完成", **result)
+        return {"status": "success", **result}
+    except Exception as e:
+        logger.error("北向资金历史同步失败", error=str(e))
+        raise self.retry(exc=e, countdown=300)
+
+
 # ==================== 情绪面同步任务 ====================
 
 
-@shared_task(bind=True, max_retries=3)
+@shared_task(bind=True, max_retries=5)
 def sync_market_sentiment(self):
     """
     同步市场情绪数据
 
     每日收盘后执行，计算涨跌统计、连板情况等
+    若依赖的行情数据未准备好，会自动重试
     """
     from datetime import date
     from app.sync.sentiment_syncer import sentiment_syncer
@@ -328,6 +348,11 @@ def sync_market_sentiment(self):
         # 同步市场情绪指标
         sentiment_result = run_async(sentiment_syncer.sync_market_sentiment(date.today()))
 
+        # 检查是否因为缺数据而跳过
+        if sentiment_result.get("status") == "no_data":
+            logger.warning("市场情绪数据缺失（可能行情未同步），稍后重试")
+            raise self.retry(countdown=300)
+
         logger.info("市场情绪同步完成", limit_up=limit_up_result, sentiment=sentiment_result)
         return {
             "status": "success",
@@ -336,6 +361,26 @@ def sync_market_sentiment(self):
         }
     except Exception as e:
         logger.error("市场情绪同步失败", error=str(e))
+        raise self.retry(exc=e, countdown=300)
+
+
+# ==================== 宏观经济同步任务 ====================
+
+
+@shared_task(bind=True, max_retries=3)
+def sync_macro_economic_data(self):
+    """
+    同步宏观经济数据 (GDP, PMI, CPI, etc.)
+    """
+    from app.sync.macro_syncer import macro_syncer
+
+    logger.info("开始同步宏观经济数据")
+    try:
+        result = run_async(macro_syncer.sync_all())
+        logger.info("宏观经济数据同步完成", **result)
+        return {"status": "success", **result}
+    except Exception as e:
+        logger.error("宏观经济数据同步失败", error=str(e))
         raise self.retry(exc=e, countdown=300)
 
 

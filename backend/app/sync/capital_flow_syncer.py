@@ -52,6 +52,42 @@ class CapitalFlowSyncer:
             logger.error("北向资金同步失败", error=str(e))
             raise
 
+    async def sync_northbound_history(self) -> dict:
+        """
+        同步北向资金历史数据
+        """
+        logger.info("开始同步北向资金历史数据")
+
+        try:
+            # 获取历史数据
+            df = await capital_flow_adapter.get_northbound_flow_history()
+
+            if len(df) == 0:
+                logger.warning("未获取到北向资金历史数据")
+                return {"status": "no_data", "synced": 0}
+
+            # 转换为记录
+            records = []
+            for row in df.iter_rows(named=True):
+                records.append({
+                    "trade_date": row["trade_date"],
+                    "sh_net_inflow": Decimal(str(row["sh_net_inflow"])) if row["sh_net_inflow"] is not None else None,
+                    "sz_net_inflow": Decimal(str(row["sz_net_inflow"])) if row["sz_net_inflow"] is not None else None,
+                    "total_net_inflow": Decimal(str(row["total_net_inflow"])) if row["total_net_inflow"] is not None else None,
+                })
+
+            # 存储
+            async with get_db_session() as session:
+                repo = NorthboundFlowRepository(session)
+                count = await repo.upsert_many(records)
+
+            logger.info("北向资金历史同步完成", count=count)
+            return {"status": "success", "synced": count}
+
+        except Exception as e:
+            logger.error("北向资金历史同步失败", error=str(e))
+            raise
+
     async def sync_stock_fund_flow(
         self,
         trade_date: date,
