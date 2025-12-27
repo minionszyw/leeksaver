@@ -5,8 +5,10 @@
 """
 
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List
+
+import polars as pl
 
 from app.core.database import get_db_session
 from app.core.logging import get_logger
@@ -26,24 +28,56 @@ class NewsSyncer:
         """
         同步全市场新闻
 
+        基于时间窗口回溯 (Time-Window Backfill)：
+        1. 获取上次同步时间
+        2. 如果首次运行，回溯 24 小时
+        3. 否则回溯 [last_sync - 5min, now]
+        4. 获取足够多的新闻并按时间过滤
+
         Args:
-            limit: 获取数量（None 则从配置读取）
+            limit: 仅作为向后兼容参数，实际上会被忽略或作为安全上限
 
         Returns:
             同步统计信息
         """
-        from app.config import settings
-
-        limit = limit or settings.news_sync_market_limit
-        logger.info("开始同步全市场新闻", limit=limit)
+        logger.info("开始同步全市场新闻 (基于时间窗口)")
 
         try:
-            # 获取新闻数据
-            news_df = await news_adapter.get_market_news(limit=limit)
+            async with get_db_session() as session:
+                repo = NewsRepository(session)
+                last_sync_time = await repo.get_latest_publish_time()
+
+            # 计算起始时间
+            now = datetime.now()
+            if last_sync_time:
+                # 增量同步：回溯 5 分钟以防时间偏差
+                start_time = last_sync_time - timedelta(minutes=5)
+                logger.info("增量同步模式", last_sync=last_sync_time, start_time=start_time)
+            else:
+                # 冷启动：回溯 24 小时
+                start_time = now - timedelta(hours=24)
+                logger.info("冷启动模式", start_time=start_time)
+
+            # 获取新闻数据 (使用较大 limit 以确保覆盖时间窗口)
+            # 假设 AkShare 接口一次最多能返回 3000 条左右有效数据
+            FETCH_LIMIT = 3000
+            news_df = await news_adapter.get_market_news(limit=FETCH_LIMIT)
 
             if news_df is None or len(news_df) == 0:
                 logger.warning("全市场新闻数据为空")
                 return {"status": "no_data", "synced": 0}
+
+            # 按时间过滤
+            original_count = len(news_df)
+            news_df = news_df.filter(pl.col("publish_time") >= start_time)
+            filtered_count = len(news_df)
+            
+            logger.info(
+                "新闻数据时间过滤",
+                start_time=start_time,
+                original=original_count,
+                filtered=filtered_count
+            )
 
             # 转换为新闻对象并入库
             synced_count = 0
@@ -64,7 +98,7 @@ class NewsSyncer:
                     article = NewsArticle(
                         title=row["title"],
                         content=row["content"],
-                        summary=None,  # 可后续从 content 提取
+                        summary=None,
                         source=row["source"],
                         publish_time=row["publish_time"],
                         url=row["url"],
@@ -83,7 +117,7 @@ class NewsSyncer:
                 "全市场新闻同步完成",
                 synced=synced_count,
                 skipped=skipped_count,
-                total=len(news_df),
+                filtered=filtered_count,
             )
 
             # 异步生成向量（不阻塞）
@@ -94,7 +128,7 @@ class NewsSyncer:
                 "status": "success",
                 "synced": synced_count,
                 "skipped": skipped_count,
-                "total": len(news_df),
+                "total": filtered_count,
             }
 
         except Exception as e:
@@ -112,14 +146,13 @@ class NewsSyncer:
         如果没有自选股，降级为全市场新闻同步
 
         Args:
-            limit_per_stock: 每只股票获取的新闻数量（None 则从配置读取）
+            limit_per_stock: 每只股票获取的新闻数量 (默认为 50)
 
         Returns:
             同步统计信息
         """
-        from app.config import settings
-
-        limit_per_stock = limit_per_stock or settings.news_sync_watchlist_limit_per_stock
+        # 默认使用较大值以确保覆盖
+        limit_per_stock = limit_per_stock or 50
 
         logger.info("开始同步自选股新闻", limit_per_stock=limit_per_stock)
 
@@ -204,19 +237,16 @@ class NewsSyncer:
             logger.error("自选股新闻同步失败", error=str(e))
             raise
 
-    async def generate_embeddings(self, batch_size: int | None = None) -> dict:
+    async def generate_embeddings(self, batch_size: int = 100) -> dict:
         """
         为尚未生成向量的新闻生成向量
 
         Args:
-            batch_size: 批次大小（None 则从配置读取）
+            batch_size: 批次大小 (默认为 100，实际由 EmbeddingService 根据 Provider 调整)
 
         Returns:
             生成统计信息
         """
-        from app.config import settings
-
-        batch_size = batch_size or settings.embedding_batch_size
         logger.info("开始生成新闻向量", batch_size=batch_size)
 
         try:
@@ -224,6 +254,7 @@ class NewsSyncer:
                 repo = NewsRepository(session)
 
                 # 获取未生成向量的新闻
+                # 注意：这里我们获取 batch_size 条，但实际处理时 EmbeddingService 可能会根据 provider 进一步切分
                 articles = await repo.get_articles_without_embedding(limit=batch_size)
 
                 if not articles:
@@ -238,7 +269,7 @@ class NewsSyncer:
                     for article in articles
                 ]
 
-                # 批量生成向量（传递 batch_size 给提供商）
+                # 批量生成向量（传递 batch_size 给提供商，提供商会内部处理优化）
                 embeddings = await embedding_service.generate_embeddings_batch(
                     texts,
                     batch_size=batch_size,
@@ -265,7 +296,7 @@ class NewsSyncer:
         """异步生成向量（后台任务）"""
         try:
             await asyncio.sleep(5)  # 延迟 5 秒启动
-            await self.generate_embeddings()  # 使用配置的默认值
+            await self.generate_embeddings()
         except Exception as e:
             logger.error("异步生成向量失败", error=str(e))
 

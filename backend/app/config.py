@@ -83,23 +83,6 @@ class Settings(BaseSettings):
     ollama_base_url: str = "http://localhost:11434"
     ollama_model: str = "qwen2.5:14b"
 
-    # 数据同步配置
-    akshare_rate_limit: int = Field(default=5, description="AkShare 每秒最大请求数")
-    akshare_rate_limit_window: int = Field(default=1, description="限频时间窗口(秒)")
-    sync_batch_size: int = Field(default=100, description="数据同步批量大小")
-
-    # 新闻同步配置
-    news_sync_market_limit: int = Field(default=50, description="全市场新闻每次同步数量")
-    news_sync_watchlist_limit_per_stock: int = Field(
-        default=5, description="自选股新闻：每只股票获取的新闻数量"
-    )
-    news_sync_batch_interval: float = Field(
-        default=0.5, description="批量获取新闻时的批次间隔（秒）"
-    )
-
-    # 向量生成配置
-    embedding_batch_size: int = Field(default=100, description="向量生成的批次大小")
-
     # 数据清理配置
     news_retention_days: int = Field(default=90, description="新闻保留天数")
     news_cleanup_protect_watchlist: bool = Field(
@@ -155,15 +138,6 @@ class Settings(BaseSettings):
     # 数据健康巡检（每天 09:00）
     health_check_hour: int = Field(default=9, description="数据健康巡检小时")
     health_check_minute: int = Field(default=0, description="数据健康巡检分钟")
-
-    # ==================== 批量处理配置 ====================
-
-    fund_flow_batch_size: int = Field(default=50, description="资金流向批量大小")
-    valuation_batch_size: int = Field(default=100, description="估值数据批量大小")
-    tech_indicator_batch_size: int = Field(default=100, description="技术指标批量大小")
-    tech_indicator_history_days: int = Field(
-        default=120, description="技术指标计算所需的历史数据天数"
-    )
 
     # 向量服务配置
     embedding_provider: Literal["openai", "siliconflow", "ollama"] = Field(

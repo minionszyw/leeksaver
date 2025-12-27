@@ -17,6 +17,13 @@ from app.services.embedding.factory import get_embedding_provider
 logger = get_logger(__name__)
 
 
+PROVIDER_CONFIGS = {
+    "openai": {"batch_size": 100, "concurrency": 10},
+    "ollama": {"batch_size": 5, "concurrency": 2},
+    "siliconflow": {"batch_size": 50, "concurrency": 5},
+}
+
+
 class EmbeddingService:
     """
     文本向量化服务（统一入口）
@@ -60,19 +67,35 @@ class EmbeddingService:
     async def generate_embeddings_batch(
         self,
         texts: List[str],
-        batch_size: int = 100,
+        batch_size: int | None = None,
     ) -> List[List[float]]:
         """
         批量生成向量
 
         Args:
             texts: 文本列表
-            batch_size: 批次大小（传递给提供商）
+            batch_size: 批次大小（保留参数以兼容，但优先使用 Provider 配置）
 
         Returns:
             向量列表
         """
-        return await self.provider.generate_embeddings_batch(texts, batch_size)
+        from app.config import settings
+
+        # 根据 Provider 获取配置
+        provider_type = settings.embedding_provider
+        config = PROVIDER_CONFIGS.get(provider_type, {})
+        
+        # 优先使用配置中的 batch_size，如果未配置则使用传入值或默认值 100
+        final_batch_size = config.get("batch_size", batch_size or 100)
+        
+        logger.debug(
+            "批量生成向量", 
+            provider=provider_type, 
+            text_count=len(texts), 
+            batch_size=final_batch_size
+        )
+        
+        return await self.provider.generate_embeddings_batch(texts, batch_size=final_batch_size)
 
     async def search_similar_news(
         self,

@@ -5,6 +5,7 @@ AkShare 数据源适配器
 """
 
 import asyncio
+import random
 from datetime import date, datetime, timedelta
 from typing import Any
 
@@ -18,6 +19,34 @@ from app.datasources.rate_limiter import akshare_limiter
 logger = get_logger(__name__)
 
 
+def retry_with_backoff(retries: int = 3, backoff_in_seconds: int = 1):
+    """
+    指数退避重试装饰器
+    """
+    def decorator(func):
+        async def wrapper(*args, **kwargs):
+            x = 0
+            while True:
+                try:
+                    return await func(*args, **kwargs)
+                except Exception as e:
+                    # 检查是否为网络错误或限频错误
+                    # 这里捕获所有 Exception，因为 AkShare 抛出的错误类型不统一
+                    if x == retries:
+                        raise
+                    
+                    sleep = (backoff_in_seconds * 2 ** x + random.uniform(0, 1))
+                    logger.warning(
+                        f"调用失败，将在 {sleep:.2f}s 后重试: {str(e)}",
+                        func=func.__name__,
+                        retry=x + 1
+                    )
+                    await asyncio.sleep(sleep)
+                    x += 1
+        return wrapper
+    return decorator
+
+
 class AkShareAdapter(DataSourceBase):
     """
     AkShare 数据源适配器
@@ -28,6 +57,7 @@ class AkShareAdapter(DataSourceBase):
     def __init__(self):
         pass
 
+    @retry_with_backoff(retries=3, backoff_in_seconds=1)
     async def _run_sync(self, func, *args, **kwargs):
         """在线程池中运行同步函数"""
         async with akshare_limiter:

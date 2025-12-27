@@ -10,7 +10,6 @@ import time
 from collections import deque
 from typing import Callable, TypeVar, ParamSpec
 
-from app.config import settings
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -93,8 +92,8 @@ class RateLimiter:
 
 # 全局限频器实例 (用于 AkShare)
 akshare_limiter = RateLimiter(
-    max_requests=settings.akshare_rate_limit,
-    window_seconds=settings.akshare_rate_limit_window,
+    max_requests=5,
+    window_seconds=1,
     jitter_range=(0.1, 0.3),
 )
 

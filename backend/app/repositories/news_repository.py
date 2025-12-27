@@ -192,3 +192,9 @@ class NewsRepository(BaseRepository[NewsArticle]):
         stmt = select(NewsArticle).where(NewsArticle.embedding.is_not(None))
         result = await self.session.execute(stmt)
         return len(list(result.scalars().all()))
+
+    async def get_latest_publish_time(self) -> Optional[datetime]:
+        """获取最新一条新闻的发布时间"""
+        stmt = select(NewsArticle.publish_time).order_by(desc(NewsArticle.publish_time)).limit(1)
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
