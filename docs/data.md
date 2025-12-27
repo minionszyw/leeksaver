@@ -1,210 +1,128 @@
-# 数据存储与调度策略文档
+# 数据层文档
 
-本文档详细描述了 LeekSaver 项目的数据库表结构、字段定义以及各数据的分层调度策略。
+## 1. 概览
 
-## 1. 数据库概览
+本项目数据层采用 **PostgreSQL** 作为核心数据库，并集成了以下扩展以支持特定场景：
+- **TimescaleDB**: 用于高效存储和查询金融时间序列数据（如行情、分钟线）。
+- **pgvector**: 用于存储文本向量（如新闻 Embedding），支持 RAG（检索增强生成）场景。
 
-本项目主要使用 PostgreSQL (配合 TimescaleDB 插件) 存储结构化数据和时序数据。
+ORM 框架使用 **SQLAlchemy 2.0**，支持异步操作。数据处理与清洗主要使用 **Polars**，以确保高性能。
 
-**核心数据表清单：**
+## 2. 数据模型
 
-| 表名 | 描述 | 存储类型 |
+### 2.1 核心基础数据
+| 表名 | 描述 | 关键字段 |
 | :--- | :--- | :--- |
-| `stocks` | 股票/ETF 基础信息 | 关系型 |
-| `watchlist` | 用户自选股 | 关系型 |
-| `daily_quotes` | 日线行情 (L1) | **时序数据 (Hypertable)** |
-| `minute_quotes` | 分钟行情 (L3) | **时序数据 (Hypertable)** |
-| `financial_statements` | 财务报表 | 关系型 |
-| `operation_data` | 经营数据 (KV) | 关系型 |
-| `news_articles` | 财经新闻 (含向量) | 关系型 + pgvector |
-| `northbound_flows` | 北向资金 | 时序数据 |
-| `stock_fund_flows` | 个股资金流向 | 时序数据 |
-| `dragon_tiger` | 龙虎榜数据 | 关系型 |
-| `margin_trades` | 融资融券 | 时序数据 |
-| `market_sentiments` | 市场情绪指标 | 时序数据 |
-| `limit_up_stocks` | 涨停股详情 | 关系型 |
-| `daily_valuations` | 每日估值 (PE/PB) | 时序数据 |
-| `tech_indicators` | 技术指标预计算 | 时序数据 |
-| `sectors` | 板块基础信息 | 关系型 |
-| `sector_quotes` | 板块行情 | 时序数据 |
-| `macro_indicators` | 宏观经济数据 | 时序数据 |
+| `stocks` | 股票/ETF 基础信息 | `code` (主键), `name`, `market`, `industry`, `list_date` |
+| `sectors` | 板块/概念信息 | `code`, `name`, `sector_type` (industry/concept/region) |
+| `watchlist` | 用户自选股 | `id`, `code`, `sort_order`, `note` |
 
----
+### 2.2 行情数据 (TimescaleDB Hypertable)
+这些表启用了 TimescaleDB 超表功能，按时间自动分区。
 
-## 2. 数据表详情
+| 表名 | 描述 | 频率 | 关键字段 |
+| :--- | :--- | :--- | :--- |
+| `daily_quotes` | 日线行情 | 日频 | `code`, `trade_date`, `open`, `high`, `low`, `close`, `volume`, `amount` |
+| `minute_quotes` | 分钟线行情 | 分钟频 | `code`, `timestamp`, `open`, `high`, `low`, `close`, `volume` |
+| `sector_quotes` | 板块日线行情 | 日频 | `sector_code`, `trade_date`, `index_value`, `change_pct` |
 
-### 2.1 基础信息
-
-#### `stocks` (股票/ETF 基础信息)
-| 字段名 | 类型 | 描述 |
+### 2.3 财务与经营数据
+| 表名 | 描述 | 关键字段 |
 | :--- | :--- | :--- |
-| `code` | String(10) | **主键**。股票代码 (如 000001) |
-| `name` | String(50) | 股票名称 |
-| `market` | String(10) | 市场 (SH/SZ/BJ) |
-| `asset_type` | String(10) | 类型 (stock/etf) |
-| `industry` | String(50) | 所属行业 |
-| `list_date` | Date | 上市日期 |
-| `is_active` | Boolean | 是否正常交易 |
+| `financial_statements` | 季度财务报表 | `code`, `end_date` (截止日), `report_type` (季报/年报), `total_revenue`, `net_profit`, `roe_weighted` |
+| `operation_data` | 经营数据 (KV) | `code`, `period`, `metric_name`, `metric_value`, `unit` (用于存储非标准化的运营数据，如销量、产能) |
 
-#### `watchlist` (自选股)
-| 字段名 | 类型 | 描述 |
+### 2.4 资金流向数据
+| 表名 | 描述 | 关键字段 |
 | :--- | :--- | :--- |
-| `id` | Integer | **主键** |
-| `code` | String(10) | 股票代码 |
-| `sort_order` | Integer | 排序顺序 |
-| `note` | String(200) | 备注 |
+| `northbound_flows` | 北向资金 | `trade_date`, `sh_net_inflow`, `sz_net_inflow` |
+| `stock_fund_flows` | 个股资金流向 | `code`, `trade_date`, `main_net_inflow` (主力净流入), `super_large_net` (超大单) |
+| `dragon_tiger` | 龙虎榜 | `code`, `trade_date`, `reason`, `buy_amount`, `sell_amount` |
+| `margin_trades` | 融资融券 | `code`, `trade_date`, `rzye` (融资余额), `rqyl` (融券余量) |
 
-#### `sectors` (板块信息)
-| 字段名 | 类型 | 描述 |
+### 2.5 市场情绪与宏观
+| 表名 | 描述 | 关键字段 |
 | :--- | :--- | :--- |
-| `code` | String(20) | **主键**。板块代码 |
-| `name` | String(100) | 板块名称 |
-| `sector_type` | String(20) | 类型 (industry/concept/region) |
-| `level` | Integer | 级别 (1/2/3) |
-| `parent_code` | String(20) | 父板块代码 |
+| `market_sentiments` | 每日市场情绪 | `trade_date`, `rising_count` (上涨家数), `limit_up_count` (涨停家数), `highest_board_stock` (最高板) |
+| `limit_up_stocks` | 涨停股详情 | `code`, `trade_date`, `limit_up_time`, `continuous_days` (连板天数), `reason` |
+| `macro_indicators` | 宏观经济指标 | `indicator_name` (GDP/CPI等), `period`, `value`, `yoy_rate` |
 
-### 2.2 行情数据
-
-#### `daily_quotes` (日线行情)
-*TimescaleDB Hypertable*
-| 字段名 | 类型 | 描述 |
+### 2.6 新闻与 AI (pgvector)
+| 表名 | 描述 | 关键字段 |
 | :--- | :--- | :--- |
-| `code` | String(10) | **主键**。股票代码 |
-| `trade_date` | Date | **主键**。交易日期 |
-| `open` | Numeric | 开盘价 |
-| `high` | Numeric | 最高价 |
-| `low` | Numeric | 最低价 |
-| `close` | Numeric | 收盘价 |
-| `volume` | BigInteger | 成交量 (股) |
-| `amount` | Numeric | 成交额 (元) |
-| `change` | Numeric | 涨跌额 |
-| `change_pct` | Numeric | 涨跌幅 (%) |
-| `turnover_rate` | Numeric | 换手率 (%) |
+| `news_articles` | 财经新闻 | `id`, `title`, `content`, `publish_time`, `embedding` (1536维向量) |
 
-#### `minute_quotes` (分钟行情)
-*TimescaleDB Hypertable*
-| 字段名 | 类型 | 描述 |
+> **注**: `embedding` 字段默认使用 OpenAI `text-embedding-3-small` 模型生成（可通过环境变量 `EMBEDDING_OPENAI_MODEL` 配置），配合 HNSW 索引实现高效相似度搜索。
+
+### 2.7 衍生指标
+| 表名 | 描述 | 关键字段 |
 | :--- | :--- | :--- |
-| `code` | String(10) | **主键**。股票代码 |
-| `timestamp` | DateTime | **主键**。时间戳 |
-| `open/high/low/close` | Numeric | OHLC |
-| `volume` | BigInteger | 成交量 |
+| `daily_valuations` | 每日估值 | `code`, `trade_date`, `pe_ttm`, `pb`, `dv_ttm` (股息率) |
+| `tech_indicators` | 技术指标预计算 | `code`, `trade_date`, `ma5/10/20`, `macd_dif`, `rsi_14`, `kdj_k` |
 
-#### `sector_quotes` (板块行情)
-| 字段名 | 类型 | 描述 |
+### 2.8 系统管理
+| 表名 | 描述 | 关键字段 |
 | :--- | :--- | :--- |
-| `sector_code` | String(20) | 板块代码 |
-| `trade_date` | Date | 交易日期 |
-| `index_value` | Numeric | 板块指数 |
-| `change_pct` | Numeric | 涨跌幅 |
-| `leading_stock` | String(10) | 领涨股代码 |
+| `sync_errors` | 同步错误日志 | `task_name`, `target_code`, `error_type`, `retry_count` |
 
-### 2.3 财务与基本面
+## 3. 数据源 (Adapters)
 
-#### `financial_statements` (财务报表)
-| 字段名 | 类型 | 描述 |
-| :--- | :--- | :--- |
-| `code` | String(10) | **主键** |
-| `end_date` | Date | **主键**。报告期截止日 |
-| `report_type` | String(20) | 报告类型 (一季报/年报等) |
-| `pub_date` | Date | 公告日期 |
-| `total_revenue` | Numeric | 营业总收入 |
-| `net_profit` | Numeric | 归母净利润 |
-| `roe_weighted` | Numeric | ROE |
-| `gross/net_profit_margin` | Numeric | 毛利率/净利率 |
-| `revenue/net_profit_yoy` | Numeric | 同比增长率 |
+项目统一使用 **AkShare** 作为主要数据源，通过 `Adapter` 模式进行封装。
 
-#### `daily_valuations` (每日估值)
-| 字段名 | 类型 | 描述 |
-| :--- | :--- | :--- |
-| `code` | String(10) | **主键** |
-| `trade_date` | Date | **主键** |
-| `pe_ttm` | Numeric | 市盈率 (TTM) |
-| `pb` | Numeric | 市净率 |
-| `total_mv` | Numeric | 总市值 |
-| `dv_ttm` | Numeric | 股息率 |
+- **AkShareAdapter** (`backend/app/datasources/akshare_adapter.py`)
+    - 封装 AkShare 的同步 API 为异步方法（`run_in_executor`）。
+    - 返回 **Polars DataFrame**，进行统一的数据清洗和格式转换。
+    - **自适应限频与重试**：内置基于令牌桶的限流控制（默认 5 QPS），并集成了**指数退避重试机制**（Exponential Backoff），在遇到网络抖动或触发 API 阈值时自动重试。
 
-### 2.4 资金面
+主要接口：
+- `get_stock_list()`: 获取 A 股列表
+- `get_daily_quotes(code, start, end)`: 获取日线行情（自动复权）
+- `get_financial_statements(code)`: 获取财务报表
+- `get_realtime_quote(code)`: 获取实时快照
 
-#### `northbound_flows` (北向资金)
-| 字段名 | 类型 | 描述 |
-| :--- | :--- | :--- |
-| `trade_date` | Date | **主键** |
-| `sh/sz_net_inflow` | Numeric | 沪/深股通净流入 |
-| `total_net_inflow` | Numeric | 合计净流入 |
+## 4. 数据同步与分层调度 (Tiered Scheduling)
 
-#### `stock_fund_flows` (个股资金流向)
-| 字段名 | 类型 | 描述 |
-| :--- | :--- | :--- |
-| `code` | String(10) | **主键** |
-| `trade_date` | Date | **主键** |
-| `main_net_inflow` | Numeric | 主力净流入 |
-| `super/large/medium/small_net` | Numeric | 超大/大/中/小单净流入 |
+系统采用 L1/L2/L3 分层调度策略，以平衡数据时效性与系统负载。
 
-#### `dragon_tiger` (龙虎榜)
-| 字段名 | 类型 | 描述 |
-| :--- | :--- | :--- |
-| `code` | String(10) | 股票代码 |
-| `trade_date` | Date | 交易日期 |
-| `reason` | String | 上榜原因 |
-| `net_amount` | Numeric | 净买入额 |
+### 4.1 L1 - 日更组 (Daily)
+**频率**: 每日收盘后 (默认 17:30)
+**覆盖范围**: 全市场 (A股 + ETF)
+**同步内容**:
+- **基础行情**: 全市场日线数据 (`daily_quotes`)
+- **资金流向**: 北向资金、个股资金流、龙虎榜、两融数据
+- **衍生数据**: 每日估值 (PE/PB)、市场情绪指标、技术指标计算
+- **数据量**: 约 5000+ 标的/日
 
-### 2.5 情绪与资讯
+### 4.2 L2 - 日内组 (Intraday)
+**频率**: 交易时段每 5 分钟 (300秒) 轮询
+**覆盖范围**: 重点关注对象 (自选股 + 热门板块)
+**同步内容**:
+- **财经新闻**: 基于**时间窗口回溯 (Time-Window Backfill)** 策略。
+    - 增量模式：回溯至 `last_sync_time - 5min`，确保不遗漏边缘数据。
+    - 冷启动模式：首次运行自动回溯 24 小时。
+- **自选行情**: 刷新自选股的日线数据 (更新今日的 Open/High/Low/Close)
+- **板块行情**: 行业与概念板块指数
+- **向量生成**: 为新入库的新闻生成 Embedding。支持 **Provider-Aware Batching**，根据提供商（OpenAI/SiliconFlow/Ollama）自动调整并发与批次大小。
+- **注**: `minute_quotes` (分钟线) 表结构虽存在，但目前调度任务未填充此数据。
 
-#### `news_articles` (新闻)
-| 字段名 | 类型 | 描述 |
-| :--- | :--- | :--- |
-| `id` | Integer | **主键** |
-| `title` | String | 标题 |
-| `content` | Text | 正文 |
-| `publish_time` | DateTime | 发布时间 |
-| `related_stocks` | String | 关联股票 (JSON) |
-| `embedding` | Vector(1536) | 文本向量 (OpenAI) |
+### 4.3 L3 - 按需组 (On-Demand)
+**频率**: 实时 (API 触发)
+**缓存**: 10秒 (TTL)
+**覆盖范围**: 单个标的
+**同步内容**:
+- 用户查看某只股票详情时，触发 `sync_single_stock` 获取最新快照。
 
-#### `market_sentiments` (市场情绪)
-| 字段名 | 类型 | 描述 |
-| :--- | :--- | :--- |
-| `trade_date` | Date | **主键** |
-| `limit_up/down_count` | Integer | 涨跌停家数 |
-| `rising/falling_count` | Integer | 涨跌家数 |
-| `continuous_limit_up_count` | Integer | 连板家数 |
+### 4.4 特殊任务
+- **财务报表**: 每周六 20:00 同步全市场季报/年报。
+- **数据清洗**: 每周一 02:00 清理过期新闻 (保留90天，自选股新闻受保护)。
+- **健康巡检**: 每日 09:00 检查数据完整性。
 
----
+同步流程由 Celery Beat 调度，`backend/app/tasks/schedules.py` 定义具体的时间策略，支持错峰执行。
 
-## 3. 分层调度策略
+## 5. 数据库交互与性能优化
 
-系统采用分层异步调度策略，根据数据的重要性和更新频率进行区分。
-
-### 3.1 核心行情 (L1 & L2)
-*   **日线行情 (Full Market)**:
-    *   **策略**: 每日全量同步。
-    *   **时机**: 交易日收盘后 (约 16:00)。
-*   **自选股行情 (Watchlist)**:
-    *   **策略**: 优先高频同步。
-    *   **时机**: 交易日 08:00 - 18:00 之间可能有多次触发，或用户访问时按需同步。
-*   **分钟行情 (On-Demand)**:
-    *   **策略**: 仅按需获取，保留短期数据。
-
-### 3.2 盘后数据 (Post-Close Analysis)
-以下数据在每日收盘后（通常 17:00 - 19:00）依次执行：
-1.  **北向资金**: 获取当日沪深股通流向。
-2.  **个股资金流向**: 获取主力/散户资金分布。
-3.  **龙虎榜**: 获取当日上榜数据 (通常 18:00 后数据完整)。
-4.  **融资融券**: 获取前一交易日两融余额 (交易所延时发布)。
-5.  **市场情绪**: 统计当日涨跌停、连板高度等。
-6.  **每日估值**: 基于收盘价更新 PE/PB/市值。
-7.  **技术指标**: 重新计算全市场 MA/MACD/RSI 等。
-8.  **板块行情**: 更新行业/概念板块指数。
-
-### 3.3 资讯与非结构化数据
-*   **财经新闻**:
-    *   **频率**: 每日两次 (早 08:00 晨报，晚 18:00 收盘总结)。
-    *   **范围**: 全市场热点 + 自选股相关。
-    *   **处理**: 每小时批量生成 Embedding 向量。
-*   **财务报表**:
-    *   **频率**: 每周一次 (通常周末)。
-    *   **逻辑**: 扫描全市场是否有新发布的季度/年度报告。
-
-### 3.4 基础数据
-*   **股票列表**: 定期同步 (如每周或每月)，处理新股上市/退市。
-*   **宏观数据**: 低频更新 (月度/季度)，通常在每月固定日期发布后同步。
+- **查询**: 使用 SQLAlchemy 的 `select` 语法。
+- **批量写入**: `BaseRepository` 统一封装了批量插入/更新逻辑。为规避 PostgreSQL 的参数数量限制（32767），默认批次大小限制为 **3000** 条记录。
+- **零配置设计**: 系统移除了大部分技术参数（如 `BATCH_SIZE`, `RATE_LIMIT` 等）的外部配置，转而根据数据提供商和数据库后端自动适配。
+- **分析**: 对于复杂的时序分析（如计算 MA、收益率），建议利用 TimescaleDB 的 `time_bucket` 等函数在数据库层完成聚合，或加载到 Polars 进行内存计算。
+- **向量检索**: 使用 `session.scalars(select(NewsArticle).order_by(NewsArticle.embedding.cosine_distance(query_vec)).limit(k))`。

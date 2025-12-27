@@ -80,3 +80,5 @@ alembic/versions/*.pyc
 
 debug_*.py
 test_*.py
+
+review.md
