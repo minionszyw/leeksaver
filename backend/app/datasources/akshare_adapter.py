@@ -253,6 +253,62 @@ class AkShareAdapter(DataSourceBase):
             logger.error("获取日线行情失败", code=code, error=str(e))
             raise
 
+    async def get_minute_quotes(
+        self,
+        code: str,
+        period: str = "1",
+        adjust: str = "qfq",
+    ) -> pl.DataFrame:
+        """
+        获取股票分钟行情
+
+        使用 stock_zh_a_minute 接口
+        """
+        logger.debug("获取分钟行情", code=code, period=period)
+
+        try:
+            # 调用 AkShare 接口
+            df = await self._run_sync(
+                ak.stock_zh_a_minute,
+                symbol=code,
+                period=period,
+                adjust=adjust,
+            )
+
+            if df is None or df.empty:
+                logger.warning("分钟行情数据为空", code=code)
+                return pl.DataFrame()
+
+            # 转换为 Polars DataFrame
+            result = pl.from_pandas(df)
+
+            # 规范化列名
+            # AkShare 返回列名：day, open, high, low, close, volume
+            result = result.select(
+                pl.lit(code).alias("code"),
+                pl.col("day").str.to_datetime().alias("timestamp"),
+                pl.col("open").cast(pl.Decimal(10, 2)),
+                pl.col("high").cast(pl.Decimal(10, 2)),
+                pl.col("low").cast(pl.Decimal(10, 2)),
+                pl.col("close").cast(pl.Decimal(10, 2)),
+                pl.col("volume").cast(pl.Int64),
+            )
+
+            # 基础清洗
+            result = result.filter(
+                pl.col("open").is_not_null() & (pl.col("open") > 0) &
+                pl.col("high").is_not_null() & (pl.col("high") > 0) &
+                pl.col("low").is_not_null() & (pl.col("low") > 0) &
+                pl.col("close").is_not_null() & (pl.col("close") > 0)
+            )
+
+            logger.debug("获取分钟行情成功", code=code, count=len(result))
+            return result
+
+        except Exception as e:
+            logger.error("获取分钟行情失败", code=code, error=str(e))
+            raise
+
     async def get_financial_statements(
         self,
         code: str,

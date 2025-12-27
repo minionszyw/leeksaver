@@ -9,7 +9,7 @@ from sqlalchemy import select, delete, func
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.market_data import DailyQuote
+from app.models.market_data import DailyQuote, MinuteQuote
 from app.repositories.base import BaseRepository
 from app.core.logging import get_logger
 
@@ -53,6 +53,29 @@ class MarketDataRepository(BaseRepository[DailyQuote]):
         result = await self.session.execute(query)
         return result.scalars().all()
 
+
+class MinuteQuoteRepository(BaseRepository[MinuteQuote]):
+    """分钟行情数据访问层"""
+
+    def __init__(self, session: AsyncSession):
+        super().__init__(session, MinuteQuote)
+
+    async def get_latest_timestamp(self, code: str) -> "datetime | None":
+        """获取股票最新分钟线时间戳"""
+        from datetime import datetime
+        result = await self.session.execute(
+            select(func.max(MinuteQuote.timestamp)).where(MinuteQuote.code == code)
+        )
+        return result.scalar()
+
+    async def upsert_many(self, quotes: list[dict]) -> int:
+        """批量插入或更新分钟行情"""
+        count = await super().upsert_many(
+            records=quotes,
+            conflict_columns=["code", "timestamp"],
+        )
+        await self.session.commit()
+        return count
     async def get_latest_quote(self, code: str) -> DailyQuote | None:
         """获取最新日线行情"""
         result = await self.session.execute(

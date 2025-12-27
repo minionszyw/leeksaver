@@ -44,7 +44,7 @@ ORM 框架使用 **SQLAlchemy 2.0**，支持异步操作。数据处理与清洗
 | 表名 | 描述 | 关键字段 |
 | :--- | :--- | :--- |
 | `market_sentiments` | 每日市场情绪 | `trade_date`, `rising_count` (上涨家数), `limit_up_count` (涨停家数), `highest_board_stock` (最高板) |
-| `limit_up_stocks` | 涨停股详情 | `code`, `trade_date`, `limit_up_time`, `continuous_days` (连板天数), `reason` |
+| `limit_up_stocks` | 涨停股详情 | `code`, `trade_date`, `limit_up_time`, `continuous_days` (连板天数), `concept` (涨停概念), `industry` |
 | `macro_indicators` | 宏观经济指标 | `indicator_name` (GDP/CPI等), `period`, `value`, `yoy_rate` |
 
 ### 2.6 新闻与 AI (pgvector)
@@ -88,6 +88,7 @@ ORM 框架使用 **SQLAlchemy 2.0**，支持异步操作。数据处理与清洗
 **频率**: 每日收盘后 (默认 17:30)
 **覆盖范围**: 全市场 (A股 + ETF)
 **同步内容**:
+- **基础列表**: 全市场股票/ETF 列表更新 (`stocks`)
 - **基础行情**: 全市场日线数据 (`daily_quotes`)
 - **资金流向**: 北向资金、个股资金流、龙虎榜、两融数据
 - **衍生数据**: 每日估值 (PE/PB)、市场情绪指标、技术指标计算
@@ -101,9 +102,9 @@ ORM 框架使用 **SQLAlchemy 2.0**，支持异步操作。数据处理与清洗
     - 增量模式：回溯至 `last_sync_time - 5min`，确保不遗漏边缘数据。
     - 冷启动模式：首次运行自动回溯 24 小时。
 - **自选行情**: 刷新自选股的日线数据 (更新今日的 Open/High/Low/Close)
+- **自选分钟线**: 刷新自选股的分钟行情数据 (`minute_quotes`)。
 - **板块行情**: 行业与概念板块指数
 - **向量生成**: 为新入库的新闻生成 Embedding。支持 **Provider-Aware Batching**，根据提供商（OpenAI/SiliconFlow/Ollama）自动调整并发与批次大小。
-- **注**: `minute_quotes` (分钟线) 表结构虽存在，但目前调度任务未填充此数据。
 
 ### 4.3 L3 - 按需组 (On-Demand)
 **频率**: 实时 (API 触发)

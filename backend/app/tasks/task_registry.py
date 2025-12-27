@@ -57,6 +57,13 @@ class TaskMetadata:
 
 L1_TASKS = [
     TaskMetadata(
+        name="daily-stock-list-sync",
+        task_path="app.tasks.sync_tasks.sync_stock_list",
+        tier=TaskTier.L1,
+        schedule_type=ScheduleType.CRONTAB,
+        description="股票列表同步（每日发现新股/ETF）",
+    ),
+    TaskMetadata(
         name="daily-market-sync",
         task_path="app.tasks.sync_tasks.sync_daily_quotes",
         tier=TaskTier.L1,
@@ -142,6 +149,14 @@ L2_TASKS = [
         schedule_type=ScheduleType.INTERVAL,
         offset_multiplier=2,  # offset: 2 * 120s = 240s
         description="自选股行情同步",
+    ),
+    TaskMetadata(
+        name="intraday-minute-quotes-sync",
+        task_path="app.tasks.sync_tasks.sync_minute_quotes",
+        tier=TaskTier.L2,
+        schedule_type=ScheduleType.INTERVAL,
+        offset_multiplier=2.5,  # offset: 2.5 * 120s = 300s
+        description="自选股分钟行情同步",
     ),
     TaskMetadata(
         name="intraday-sector-quotes-sync",

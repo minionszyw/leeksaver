@@ -84,6 +84,23 @@ def sync_watchlist_quotes(self):
 
 
 @shared_task(bind=True, max_retries=3)
+def sync_minute_quotes(self):
+    """
+    同步自选股分钟行情数据 (L2)
+    """
+    from app.sync.minute_quote_syncer import minute_quote_syncer
+
+    logger.info("开始同步自选股分钟行情")
+    try:
+        result = run_async(minute_quote_syncer.sync_watchlist())
+        logger.info("自选股分钟行情同步完成", **result)
+        return {"status": "success", **result}
+    except Exception as e:
+        logger.error("自选股分钟行情同步失败", error=str(e))
+        raise self.retry(exc=e, countdown=60)
+
+
+@shared_task(bind=True, max_retries=3)
 def sync_single_stock(self, code: str):
     """
     按需同步单只股票数据 (L3)
