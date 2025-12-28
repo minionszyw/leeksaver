@@ -104,16 +104,32 @@ class CapitalFlowAdapter:
                 return pl.DataFrame()
 
             # 处理沪股通
-            sh_data = pl.from_pandas(sh_df).select(
-                pl.col("日期").str.to_date("%Y-%m-%d").alias("trade_date"),
-                pl.col("当日成交净买额").cast(pl.Float64).alias("sh_net_inflow"),
-            )
+            sh_pl = pl.from_pandas(sh_df)
+            # 检查日期列类型
+            if sh_pl["日期"].dtype == pl.Utf8:
+                sh_data = sh_pl.select(
+                    pl.col("日期").str.to_date("%Y-%m-%d").alias("trade_date"),
+                    pl.col("当日成交净买额").cast(pl.Float64).alias("sh_net_inflow"),
+                )
+            else:
+                # 假设已经是 Date 类型
+                sh_data = sh_pl.select(
+                    pl.col("日期").cast(pl.Date).alias("trade_date"),
+                    pl.col("当日成交净买额").cast(pl.Float64).alias("sh_net_inflow"),
+                )
 
             # 处理深股通
-            sz_data = pl.from_pandas(sz_df).select(
-                pl.col("日期").str.to_date("%Y-%m-%d").alias("trade_date"),
-                pl.col("当日成交净买额").cast(pl.Float64).alias("sz_net_inflow"),
-            )
+            sz_pl = pl.from_pandas(sz_df)
+            if sz_pl["日期"].dtype == pl.Utf8:
+                sz_data = sz_pl.select(
+                    pl.col("日期").str.to_date("%Y-%m-%d").alias("trade_date"),
+                    pl.col("当日成交净买额").cast(pl.Float64).alias("sz_net_inflow"),
+                )
+            else:
+                sz_data = sz_pl.select(
+                    pl.col("日期").cast(pl.Date).alias("trade_date"),
+                    pl.col("当日成交净买额").cast(pl.Float64).alias("sz_net_inflow"),
+                )
 
             # 合并数据 (outer join)
             result = sh_data.join(sz_data, on="trade_date", how="outer")
@@ -129,10 +145,6 @@ class CapitalFlowAdapter:
                 (pl.col("sh_net_inflow") + pl.col("sz_net_inflow")).alias("total_net_inflow")
             )
 
-            # 转换为 Decimal (为了保持一致性，但在 Polars 中通常用 Float 计算后再转，这里先保持 Float 或转 Object)
-            # 数据库层面通常接收 Decimal，这里先返回 Float 即可，Repository 层会处理
-            # 或者在这里转成 Decimal 对象 (Polars 对 Decimal 支持有限，最好由 Syncer/Repo 处理)
-            
             logger.info("获取北向资金历史数据成功", count=len(result))
             return result.sort("trade_date")
 
