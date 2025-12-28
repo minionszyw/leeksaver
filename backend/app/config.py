@@ -96,6 +96,9 @@ class Settings(BaseSettings):
     news_sync_watchlist_limit_per_stock: int = Field(
         default=20, description="自选股新闻同步单次每只股票最大数量"
     )
+    sync_batch_size: int = Field(
+        default=50, description="批量同步批次大小"
+    )
 
     # ==================== 分层调度策略配置 ====================
 
