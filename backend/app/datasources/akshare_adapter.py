@@ -474,8 +474,8 @@ class AkShareAdapter(DataSourceBase):
         为股票列表补充元数据（行业、上市日期等）
 
         策略:
-        1. 使用东方财富板块接口批量获取行业分类
-        2. 对缺失行业或上市日期的股票，使用 stock_individual_info_em 逐个补充 (带并发控制)
+        1. 少量股票 (< 100): 直接使用 stock_individual_info_em (快)
+        2. 大量股票: 使用东方财富板块接口批量获取行业分类 (减少请求数)
 
         Args:
             stock_df: 股票列表 DataFrame（需包含 code 列）
@@ -483,40 +483,45 @@ class AkShareAdapter(DataSourceBase):
         Returns:
             补充了元数据的 DataFrame
         """
-        logger.info("开始补充股票元数据")
+        logger.info("开始补充股票元数据", count=len(stock_df))
 
         try:
-            # 1. 批量获取行业分类 (东方财富)
-            industry_map = {}
-            try:
-                boards_df = await self._run_sync(ak.stock_board_industry_name_em)
-                for board_name in boards_df["板块名称"].tolist():
-                    try:
-                        cons_df = await self._run_sync(
-                            ak.stock_board_industry_cons_em, symbol=board_name
-                        )
-                        for code in cons_df["代码"].tolist():
-                            industry_map[code] = board_name
-                    except Exception as e:
-                        logger.warning(f"获取板块 {board_name} 成员失败: {e}")
-            except Exception as e:
-                logger.error(f"批量获取行业分类失败: {e}")
-
-            # 将批量结果合并到 stock_df
-            industry_pl = pl.DataFrame(
-                {"code": list(industry_map.keys()), "industry": list(industry_map.values())}
-            )
-            enriched = stock_df.join(industry_pl, on="code", how="left")
-
+            enriched = stock_df.clone()
+            
             # 确保 industry 和 list_date 列存在
             if "industry" not in enriched.columns:
                 enriched = enriched.with_columns(pl.lit(None, dtype=pl.Utf8).alias("industry"))
             if "list_date" not in enriched.columns:
                 enriched = enriched.with_columns(pl.lit(None, dtype=pl.Date).alias("list_date"))
 
-            # 2. 针对缺失数据的股票，逐个补充行业和上市日期
-            # 为避免请求过于频繁，我们只补充核心股票，或者分批补充
-            # 这里我们只处理 industry 或 list_date 为空的股票
+            # 1. 批量获取行业分类 (仅对大量股票使用)
+            if len(stock_df) > 100:
+                logger.info("标的数量较多，尝试批量获取行业分类")
+                industry_map = {}
+                try:
+                    boards_df = await self._run_sync(ak.stock_board_industry_name_em)
+                    for board_name in boards_df["板块名称"].to_list():
+                        try:
+                            cons_df = await self._run_sync(
+                                ak.stock_board_industry_cons_em, symbol=board_name
+                            )
+                            for code in cons_df["代码"].to_list():
+                                industry_map[code] = board_name
+                        except Exception as e:
+                            logger.warning(f"获取板块 {board_name} 成员失败: {e}")
+                    
+                    if industry_map:
+                        industry_pl = pl.DataFrame(
+                            {"code": list(industry_map.keys()), "industry_batch": list(industry_map.values())}
+                        )
+                        enriched = enriched.join(industry_pl, on="code", how="left")
+                        enriched = enriched.with_columns(
+                            pl.coalesce(["industry", "industry_batch"]).alias("industry")
+                        ).drop("industry_batch")
+                except Exception as e:
+                    logger.error(f"批量获取行业分类失败: {e}")
+
+            # 2. 针对仍缺失元数据的股票，逐个补充 (带并发控制)
             missing_metadata = enriched.filter(
                 pl.col("industry").is_null() | pl.col("list_date").is_null()
             )
@@ -551,25 +556,32 @@ class AkShareAdapter(DataSourceBase):
                             logger.debug(f"获取股票 {code} 详细信息失败: {e}")
                             return {"code": code, "industry_new": None, "list_date_new": None}
 
-                tasks = [fetch_info(code) for code in missing_metadata["code"].tolist()]
-                # 分批执行以防超时
+                tasks = [fetch_info(code) for code in missing_metadata["code"].to_list()]
+                
+                # 分批执行
                 batch_size = 50
                 results = []
                 for i in range(0, len(tasks), batch_size):
                     batch = tasks[i:i+batch_size]
                     batch_results = await asyncio.gather(*batch)
                     results.extend(batch_results)
-                    # 每批之后稍作停顿
-                    await asyncio.sleep(0.5)
+                    if i + batch_size < len(tasks):
+                        await asyncio.sleep(0.5)
 
                 # 更新结果
-                details_df = pl.DataFrame(results)
-                enriched = enriched.join(details_df, on="code", how="left")
-                
-                enriched = enriched.with_columns([
-                    pl.coalesce(["industry", "industry_new"]).alias("industry"),
-                    pl.coalesce(["list_date", "list_date_new"]).alias("list_date"),
-                ]).drop(["industry_new", "list_date_new"])
+                if results:
+                    details_df = pl.DataFrame(results)
+                    # 确保 details_df 包含必要的列
+                    for col in ["industry_new", "list_date_new"]:
+                        if col not in details_df.columns:
+                            details_df = details_df.with_columns(pl.lit(None).alias(col))
+                    
+                    enriched = enriched.join(details_df, on="code", how="left")
+                    
+                    enriched = enriched.with_columns([
+                        pl.coalesce(["industry", "industry_new"]).alias("industry"),
+                        pl.coalesce(["list_date", "list_date_new"]).alias("list_date"),
+                    ]).drop(["industry_new", "list_date_new"])
 
             logger.info(
                 "股票元数据补充完成",
