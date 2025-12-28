@@ -25,10 +25,29 @@ class OffsetSchedule(schedule):
         )
     """
 
-    def __init__(self, run_every, offset=None, **kwargs):
-        super().__init__(run_every, **kwargs)
+    def __init__(
+        self,
+        run_every=None,
+        relative=False,
+        nowfun=None,
+        app=None,
+        offset=None,
+        **kwargs,
+    ):
+        super().__init__(
+            run_every=run_every, relative=relative, nowfun=nowfun, app=app, **kwargs
+        )
         self.offset = offset or timedelta(seconds=0)
         self._has_run_once = False
+
+    def __reduce__(self):
+        return self.__class__, (
+            self.run_every,
+            self.relative,
+            self.nowfun,
+            None,  # app
+            self.offset,
+        )
 
     def remaining_estimate(self, last_run_at):
         """

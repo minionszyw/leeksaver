@@ -89,6 +89,14 @@ class Settings(BaseSettings):
         default=True, description="是否保护自选股相关的新闻"
     )
 
+    # 数据同步限制配置
+    news_sync_market_limit: int = Field(
+        default=100, description="全市场新闻同步单次最大数量"
+    )
+    news_sync_watchlist_limit_per_stock: int = Field(
+        default=20, description="自选股新闻同步单次每只股票最大数量"
+    )
+
     # ==================== 分层调度策略配置 ====================
 
     # L1 - 日更组：收盘后统一同步时间（HH:MM 格式）
@@ -169,6 +177,10 @@ class Settings(BaseSettings):
     )
     embedding_ollama_model: str = Field(default="nomic-embed-text", description="Ollama 向量模型")
     embedding_ollama_dimension: int = Field(default=768, description="Ollama 向量维度")
+
+    embedding_batch_size: int = Field(
+        default=50, description="向量处理批次大小"
+    )
 
     # 日志配置
     log_level: str = "INFO"
