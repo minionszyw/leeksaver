@@ -8,12 +8,11 @@ from app.config import settings
 from app.core.logging import get_logger
 from app.services.embedding.base import BaseEmbeddingProvider
 from app.services.embedding.providers.ollama import OllamaEmbeddingProvider
-from app.services.embedding.providers.openai import OpenAIEmbeddingProvider
 from app.services.embedding.providers.siliconflow import SiliconFlowEmbeddingProvider
 
 logger = get_logger(__name__)
 
-EmbeddingProviderType = Literal["openai", "siliconflow", "ollama"]
+EmbeddingProviderType = Literal["siliconflow", "ollama"]
 
 
 class EmbeddingFactory:
@@ -41,9 +40,7 @@ class EmbeddingFactory:
 
         logger.info("创建向量服务实例", provider=provider)
 
-        if provider == "openai":
-            return OpenAIEmbeddingProvider(**kwargs)
-        elif provider == "siliconflow":
+        if provider == "siliconflow":
             return SiliconFlowEmbeddingProvider(**kwargs)
         elif provider == "ollama":
             return OllamaEmbeddingProvider(**kwargs)

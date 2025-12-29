@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 from typing import List
 
 import polars as pl
+from sqlalchemy.dialects.postgresql import insert
 
 from app.core.database import get_db_session
 from app.core.logging import get_logger
@@ -23,6 +24,47 @@ logger = get_logger(__name__)
 
 class NewsSyncer:
     """新闻数据同步器"""
+
+    async def _upsert_articles(self, articles_df: pl.DataFrame) -> int:
+        """
+        批量 Upsert 新闻文章
+        
+        如果 URL 已存在，则更新 related_stocks（如果新数据包含代码）
+        """
+        if articles_df is None or len(articles_df) == 0:
+            return 0
+
+        synced_count = 0
+        async with get_db_session() as session:
+            for row in articles_df.iter_rows(named=True):
+                # 使用 PostgreSQL 的 ON CONFLICT DO UPDATE 逻辑
+                stmt = insert(NewsArticle).values(
+                    title=row["title"],
+                    content=row["content"],
+                    source=row["source"],
+                    publish_time=row["publish_time"],
+                    url=row["url"],
+                    related_stocks=row["related_stocks"],
+                    created_at=datetime.now(),
+                    updated_at=datetime.now(),
+                )
+                
+                # 如果 URL 冲突
+                # 只有当新抓取的数据包含 related_stocks 时，才更新旧记录的字段
+                update_dict = {"updated_at": datetime.now()}
+                if row["related_stocks"]:
+                    update_dict["related_stocks"] = row["related_stocks"]
+                
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=["url"],
+                    set_=update_dict
+                )
+                
+                await session.execute(stmt)
+                synced_count += 1
+            
+            await session.commit()
+        return synced_count
 
     async def sync_market_news(self, limit: int | None = None) -> dict:
         """
@@ -99,55 +141,22 @@ class NewsSyncer:
                 filtered=filtered_count
             )
 
-            # 转换为新闻对象并入库
-            synced_count = 0
-            skipped_count = 0
-            new_articles = []
-
-            async with get_db_session() as session:
-                repo = NewsRepository(session)
-
-                for row in news_df.iter_rows(named=True):
-                    # 检查是否已存在（按 URL 去重）
-                    existing = await repo.get_by_url(row["url"])
-                    if existing:
-                        skipped_count += 1
-                        continue
-
-                    # 创建新闻对象
-                    article = NewsArticle(
-                        title=row["title"],
-                        content=row["content"],
-                        summary=None,
-                        source=row["source"],
-                        publish_time=row["publish_time"],
-                        url=row["url"],
-                        related_stocks=row["related_stocks"],
-                        embedding=None,  # 后续生成
-                    )
-
-                    new_articles.append(article)
-
-                # 批量插入
-                if new_articles:
-                    synced_count = await repo.bulk_create(new_articles)
-                    await session.commit()
+            # 批量 Upsert 入库
+            synced_count = await self._upsert_articles(news_df)
 
             logger.info(
                 "全市场新闻同步完成",
                 synced=synced_count,
-                skipped=skipped_count,
                 filtered=filtered_count,
             )
 
-            # 异步生成向量（不阻塞）
+            # 触发向量生成（这里改为直接调用，确保任务执行）
             if synced_count > 0:
-                asyncio.create_task(self._generate_embeddings_async())
+                await self.generate_embeddings()
 
             return {
                 "status": "success",
                 "synced": synced_count,
-                "skipped": skipped_count,
                 "total": filtered_count,
             }
 
@@ -199,57 +208,22 @@ class NewsSyncer:
                 logger.warning("自选股新闻数据为空")
                 return {"status": "no_data", "synced": 0}
 
-            # 转换为新闻对象并入库
-            synced_count = 0
-            skipped_count = 0
-            new_articles = []
-
-            async with get_db_session() as session:
-                repo = NewsRepository(session)
-
-                for row in news_df.iter_rows(named=True):
-                    # 检查是否已存在
-                    existing = await repo.get_by_url(row["url"])
-                    if existing:
-                        skipped_count += 1
-                        continue
-
-                    # 创建新闻对象
-                    article = NewsArticle(
-                        title=row["title"],
-                        content=row["content"],
-                        summary=None,
-                        source=row["source"],
-                        publish_time=row["publish_time"],
-                        url=row["url"],
-                        related_stocks=row["related_stocks"],
-                        embedding=None,
-                    )
-
-                    new_articles.append(article)
-
-                # 批量插入
-                if new_articles:
-                    synced_count = await repo.bulk_create(new_articles)
-                    await session.commit()
+            # 批量 Upsert 入库
+            synced_count = await self._upsert_articles(news_df)
 
             logger.info(
                 "自选股新闻同步完成",
                 synced=synced_count,
-                skipped=skipped_count,
-                total=len(news_df),
                 watchlist_count=len(stock_codes),
             )
 
-            # 异步生成向量
+            # 触发向量生成
             if synced_count > 0:
-                asyncio.create_task(self._generate_embeddings_async())
+                await self.generate_embeddings()
 
             return {
                 "status": "success",
                 "synced": synced_count,
-                "skipped": skipped_count,
-                "total": len(news_df),
                 "watchlist_count": len(stock_codes),
             }
 
@@ -274,7 +248,6 @@ class NewsSyncer:
                 repo = NewsRepository(session)
 
                 # 获取未生成向量的新闻
-                # 注意：这里我们获取 batch_size 条，但实际处理时 EmbeddingService 可能会根据 provider 进一步切分
                 articles = await repo.get_articles_without_embedding(limit=batch_size)
 
                 if not articles:
@@ -289,7 +262,7 @@ class NewsSyncer:
                     for article in articles
                 ]
 
-                # 批量生成向量（传递 batch_size 给提供商，提供商会内部处理优化）
+                # 批量生成向量
                 embeddings = await embedding_service.generate_embeddings_batch(
                     texts,
                     batch_size=batch_size,
@@ -310,15 +283,8 @@ class NewsSyncer:
 
         except Exception as e:
             logger.error("新闻向量生成失败", error=str(e))
-            raise
-
-    async def _generate_embeddings_async(self):
-        """异步生成向量（后台任务）"""
-        try:
-            await asyncio.sleep(5)  # 延迟 5 秒启动
-            await self.generate_embeddings()
-        except Exception as e:
-            logger.error("异步生成向量失败", error=str(e))
+            # 向量生成失败不抛出异常，以免导致同步任务整体失败
+            return {"status": "failed", "error": str(e)}
 
 
 # 全局单例

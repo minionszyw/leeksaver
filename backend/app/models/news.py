@@ -74,11 +74,11 @@ class NewsArticle(Base, TimestampMixin):
         comment="关联股票代码列表（JSON 格式）",
     )
 
-    # 文本向量（1536 维，OpenAI text-embedding-3-small）
+    # 文本向量（1024 维，SiliconFlow BAAI/bge-m3）
     embedding: Mapped[Optional[Vector]] = mapped_column(
-        Vector(1536),
+        Vector(1024),
         nullable=True,
-        comment="文本向量（OpenAI text-embedding-3-small）",
+        comment="文本向量（1024 维，SiliconFlow BAAI/bge-m3）",
     )
 
     # 索引

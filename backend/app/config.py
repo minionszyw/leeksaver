@@ -157,18 +157,11 @@ class Settings(BaseSettings):
     health_check_minute: int = Field(default=0, description="数据健康巡检分钟")
 
     # 向量服务配置
-    embedding_provider: Literal["openai", "siliconflow", "ollama"] = Field(
-        default="openai", description="向量服务提供商"
+    embedding_provider: Literal["siliconflow", "ollama"] = Field(
+        default="siliconflow", description="向量服务提供商"
     )
 
-    # OpenAI 向量配置
-    embedding_openai_api_key: str = Field(default="", description="OpenAI API Key（向量服务专用）")
-    embedding_openai_model: str = Field(
-        default="text-embedding-3-small", description="OpenAI 向量模型"
-    )
-    embedding_openai_dimension: int = Field(default=1536, description="OpenAI 向量维度")
-
-    # SiliconFlow 向量配置
+    # SiliconFlow 向量配置（可选）
     embedding_siliconflow_api_key: str = Field(default="", description="SiliconFlow API Key")
     embedding_siliconflow_base_url: str = Field(
         default="https://api.siliconflow.cn/v1", description="SiliconFlow API 地址"
@@ -180,7 +173,7 @@ class Settings(BaseSettings):
         default=1024, description="SiliconFlow 向量维度"
     )
 
-    # Ollama 向量配置
+    # Ollama 向量配置（可选）
     embedding_ollama_base_url: str = Field(
         default="http://localhost:11434", description="Ollama API 地址"
     )
@@ -228,7 +221,6 @@ class Settings(BaseSettings):
     def embedding_api_key(self) -> str:
         """根据当前提供商返回对应的 API Key"""
         provider_key_map = {
-            "openai": self.embedding_openai_api_key,
             "siliconflow": self.embedding_siliconflow_api_key,
             "ollama": "",
         }
@@ -238,7 +230,6 @@ class Settings(BaseSettings):
     def embedding_model(self) -> str:
         """根据当前提供商返回对应的模型名称"""
         provider_model_map = {
-            "openai": self.embedding_openai_model,
             "siliconflow": self.embedding_siliconflow_model,
             "ollama": self.embedding_ollama_model,
         }
@@ -248,11 +239,10 @@ class Settings(BaseSettings):
     def embedding_dimension(self) -> int:
         """根据当前提供商返回对应的向量维度"""
         provider_dim_map = {
-            "openai": self.embedding_openai_dimension,
             "siliconflow": self.embedding_siliconflow_dimension,
             "ollama": self.embedding_ollama_dimension,
         }
-        return provider_dim_map.get(self.embedding_provider, 1536)
+        return provider_dim_map.get(self.embedding_provider, 1024)
 
 
 @lru_cache
