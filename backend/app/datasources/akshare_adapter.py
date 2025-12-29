@@ -71,6 +71,27 @@ class AkShareAdapter(DataSourceBase):
                 logger.error(f"接口调用超时 (30s): {func.__name__}")
                 raise
 
+    def _normalize_code(self, code: str) -> str:
+        """
+        规范化股票代码（添加 sh/sz 前缀）
+        
+        Args:
+            code: 原始股票代码 (如 600593)
+            
+        Returns:
+            带前缀的代码 (如 sh600593)
+        """
+        if code.startswith(("sh", "sz", "bj")):
+            return code
+            
+        if code.startswith("6"):
+            return f"sh{code}"
+        elif code.startswith(("0", "3")):
+            return f"sz{code}"
+        elif code.startswith(("4", "8", "9")):
+            return f"bj{code}"
+        return code
+
     async def get_stock_list(self) -> pl.DataFrame:
         """
         获取 A 股股票列表
@@ -307,10 +328,13 @@ class AkShareAdapter(DataSourceBase):
         logger.debug("获取分钟行情", code=code, period=period)
 
         try:
+            # 规范化股票代码（添加 sh/sz 前缀）
+            symbol = self._normalize_code(code)
+
             # 调用 AkShare 接口
             df = await self._run_sync(
                 ak.stock_zh_a_minute,
-                symbol=code,
+                symbol=symbol,
                 period=period,
                 adjust=adjust,
             )
