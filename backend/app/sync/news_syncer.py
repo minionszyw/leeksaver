@@ -47,9 +47,13 @@ class NewsSyncer:
                 repo = NewsRepository(session)
                 last_sync_time = await repo.get_latest_publish_time()
 
-            # 计算起始时间
-            now = datetime.now()
+            # 计算起始时间 (统一使用 UTC)
+            from datetime import timezone
+            now = datetime.now(timezone.utc)
             if last_sync_time:
+                # 确保 last_sync_time 是带时区的
+                if last_sync_time.tzinfo is None:
+                    last_sync_time = last_sync_time.replace(tzinfo=timezone.utc)
                 # 增量同步：回溯 5 分钟以防时间偏差
                 start_time = last_sync_time - timedelta(minutes=5)
                 logger.info("增量同步模式", last_sync=last_sync_time, start_time=start_time)
@@ -66,6 +70,11 @@ class NewsSyncer:
             if news_df is None or len(news_df) == 0:
                 logger.warning("全市场新闻数据为空")
                 return {"status": "no_data", "synced": 0}
+
+            # 统一时区：将 news_df 中的 naive datetime 转换为 UTC
+            news_df = news_df.with_columns([
+                pl.col("publish_time").dt.replace_time_zone("UTC")
+            ])
 
             # 按时间过滤
             original_count = len(news_df)

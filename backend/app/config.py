@@ -99,6 +99,12 @@ class Settings(BaseSettings):
     sync_batch_size: int = Field(
         default=50, description="批量同步批次大小"
     )
+    valuation_batch_size: int = Field(
+        default=100, description="估值同步批次大小"
+    )
+    tech_indicator_batch_size: int = Field(
+        default=100, description="技术指标计算批次大小"
+    )
 
     # ==================== 分层调度策略配置 ====================
 

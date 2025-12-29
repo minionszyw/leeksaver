@@ -17,8 +17,9 @@ class StockListSyncer:
         """
         同步全市场股票和 ETF 列表
 
-        Returns:
-            同步结果统计
+        采用两步走策略：
+        1. 快速获取基础列表并入库（代码+名称），解锁后续行情任务
+        2. 耗时抓取详细元数据并更新
         """
         logger.info("开始同步股票列表")
 
@@ -30,23 +31,34 @@ class StockListSyncer:
         }
 
         try:
-            # 获取股票列表
-            logger.info("获取股票列表...")
+            # 1. 快速获取基础列表
+            logger.info("获取股票列表基础信息...")
             stock_df = await akshare_adapter.get_stock_list()
             stats["stocks"] = len(stock_df)
 
-            # 获取 ETF 列表
-            logger.info("获取 ETF 列表...")
+            logger.info("获取 ETF 列表基础信息...")
             etf_df = await akshare_adapter.get_etf_list()
             stats["etfs"] = len(etf_df)
 
-            # 补充股票元数据（行业、上市日期等）
-            logger.info("补充股票元数据...")
+            # 快速入库基础数据 (仅代码和名称)
+            import polars as pl
+            # 统一结构以便合并入库
+            base_stocks = stock_df.select(["code", "name", "asset_type", "market"])
+            base_etfs = etf_df.select(["code", "name", "asset_type", "market"])
+            
+            all_base_df = pl.concat([base_stocks, base_etfs])
+            async with get_db_session() as session:
+                repo = StockRepository(session)
+                await repo.upsert_many(all_base_df.to_dicts())
+                await session.commit()
+            
+            logger.info("第一阶段：基础列表已入库，后续行情任务已解锁", total=len(all_base_df))
+
+            # 2. 补充股票元数据（行业、上市日期等）- 这一步较慢
+            logger.info("第二阶段：开始补充股票元数据...")
             stock_df = await akshare_adapter.enrich_stock_list_with_metadata(stock_df)
 
             # 为 ETF 添加相同的列结构（industry 和 list_date 设为 NULL）
-            import polars as pl
-
             etf_df = etf_df.with_columns(
                 [
                     pl.lit(None, dtype=pl.Utf8).alias("industry"),
@@ -54,17 +66,15 @@ class StockListSyncer:
                 ]
             )
 
-            # 合并数据
+            # 合并完整数据
             all_df = pl.concat([stock_df, etf_df])
             stats["total"] = len(all_df)
 
-            # 转换为字典列表
-            records = all_df.to_dicts()
-
-            # 写入数据库
+            # 更新数据库完整信息
             async with get_db_session() as session:
                 repo = StockRepository(session)
-                await repo.upsert_many(records)
+                await repo.upsert_many(all_df.to_dicts())
+                await session.commit()
 
             logger.info(
                 "股票列表同步完成",

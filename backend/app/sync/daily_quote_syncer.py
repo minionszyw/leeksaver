@@ -223,6 +223,35 @@ class DailyQuoteSyncer:
         logger.info("开始全市场同步", total=len(codes), asset_type=asset_type)
         return await self.sync_batch(codes, progress_callback)
 
+    async def sync_all_realtime(self) -> dict:
+        """
+        极速同步：一次性获取全市场实时行情快照并入库
+        解决单标的抓取过慢的问题
+        """
+        logger.info("开始极速全市场行情同步")
+        try:
+            df = await akshare_adapter.get_all_stock_quotes()
+            if len(df) == 0:
+                return {"status": "no_data", "synced": 0}
+            
+            records = df.to_dicts()
+            async with get_db_session() as session:
+                repo = MarketDataRepository(session)
+                # 分批 upsert 防止 SQL 过长
+                batch_size = 500
+                total_synced = 0
+                for i in range(0, len(records), batch_size):
+                    batch = records[i:i+batch_size]
+                    count = await repo.upsert_many(batch)
+                    total_synced += count
+                await session.commit()
+            
+            logger.info("极速全市场行情同步完成", count=total_synced)
+            return {"status": "success", "synced": total_synced}
+        except Exception as e:
+            logger.error("极速全市场行情同步失败", error=str(e))
+            return {"status": "failed", "error": str(e)}
+
     async def sync_watchlist(
         self,
         progress_callback: Callable[[int, int], None] | None = None,

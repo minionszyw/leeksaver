@@ -8,6 +8,8 @@ import asyncio
 from datetime import date
 from decimal import Decimal
 
+import polars as pl
+
 from app.config import settings
 from app.core.database import get_db_session
 from app.core.logging import get_logger
@@ -33,8 +35,9 @@ class ValuationSyncer:
             # 获取全市场估值数据
             df = await valuation_adapter.get_all_valuations(trade_date)
 
-            if len(df) == 0:
-                logger.warning("未获取到估值数据")
+            # 容错：检查是否为有效的 Polars DataFrame (周末或接口异常可能返回 dict 或 None)
+            if not isinstance(df, pl.DataFrame) or len(df) == 0:
+                logger.warning("未获取到全市场估值数据，可能为非交易日或接口限频", trade_date=str(trade_date))
                 return {"status": "no_data", "synced": 0}
 
             # 分批处理

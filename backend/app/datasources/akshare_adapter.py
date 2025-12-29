@@ -600,6 +600,55 @@ class AkShareAdapter(DataSourceBase):
                 stock_df = stock_df.with_columns(pl.lit(None, dtype=pl.Date).alias("list_date"))
             return stock_df
 
+    async def get_all_stock_quotes(self) -> pl.DataFrame:
+        """
+        获取全市场股票实时行情快照
+
+        使用 stock_zh_a_spot_em 接口（极速，一次请求返回全市场）
+        """
+        logger.info("获取全市场行情快照")
+
+        try:
+            # 获取实时快照
+            df = await self._run_sync(ak.stock_zh_a_spot_em)
+
+            if df is None or df.empty:
+                logger.warning("全市场行情快照为空")
+                return pl.DataFrame()
+
+            # 转换为 Polars DataFrame
+            result = pl.from_pandas(df)
+
+            # 规范化列名并映射到数据库模型
+            # 注意：spot 接口返回的是当前最新快照，我们将日期设为今天
+            trade_date = date.today()
+
+            result = result.select([
+                pl.col("代码").alias("code"),
+                pl.lit(trade_date).alias("trade_date"),
+                pl.col("今开").cast(pl.Decimal(10, 2), strict=False).alias("open"),
+                pl.col("最高").cast(pl.Decimal(10, 2), strict=False).alias("high"),
+                pl.col("最低").cast(pl.Decimal(10, 2), strict=False).alias("low"),
+                pl.col("最新价").cast(pl.Decimal(10, 2), strict=False).alias("close"),
+                pl.col("成交量").cast(pl.Int64, strict=False).alias("volume"),
+                pl.col("成交额").cast(pl.Decimal(18, 2), strict=False).alias("amount"),
+                pl.col("涨跌额").cast(pl.Decimal(10, 2), strict=False).alias("change"),
+                pl.col("涨跌幅").cast(pl.Decimal(8, 4), strict=False).alias("change_pct"),
+                pl.col("换手率").cast(pl.Decimal(8, 4), strict=False).alias("turnover_rate"),
+            ])
+
+            # 过滤无效数据（停牌或未开盘）
+            result = result.filter(
+                pl.col("open").is_not_null() & (pl.col("open") > 0)
+            )
+
+            logger.info("获取全市场行情快照成功", count=len(result))
+            return result
+
+        except Exception as e:
+            logger.error("获取全市场行情快照失败", error=str(e))
+            raise
+
     async def get_realtime_quote(self, code: str) -> dict[str, Any]:
         """
         获取实时行情

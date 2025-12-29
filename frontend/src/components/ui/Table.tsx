@@ -111,12 +111,16 @@ export default function Table<T extends Record<string, unknown>>({
 
 // 辅助组件：价格变化展示
 interface PriceChangeProps {
-  value: number
+  value: number | null | undefined
   showSign?: boolean
   suffix?: string
 }
 
 export function PriceChange({ value, showSign = true, suffix = '%' }: PriceChangeProps) {
+  if (value === null || value === undefined) {
+    return <span className="text-gray-500">-</span>
+  }
+
   const isPositive = value > 0
   const isNegative = value < 0
 
@@ -137,13 +141,17 @@ export function PriceChange({ value, showSign = true, suffix = '%' }: PriceChang
 
 // 辅助组件：价格展示
 interface PriceProps {
-  value: number
-  change?: number
+  value: number | null | undefined
+  change?: number | null
 }
 
 export function Price({ value, change }: PriceProps) {
-  const isPositive = change !== undefined && change > 0
-  const isNegative = change !== undefined && change < 0
+  if (value === null || value === undefined) {
+    return <span className="text-gray-500">-</span>
+  }
+
+  const isPositive = change !== undefined && change !== null && change > 0
+  const isNegative = change !== undefined && change !== null && change < 0
 
   return (
     <span
@@ -151,7 +159,7 @@ export function Price({ value, change }: PriceProps) {
         'font-medium',
         isPositive && 'text-red-500',
         isNegative && 'text-green-500',
-        change === undefined && 'text-gray-100'
+        (change === undefined || change === null) && 'text-gray-100'
       )}
     >
       {value.toFixed(2)}
