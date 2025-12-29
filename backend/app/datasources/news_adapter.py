@@ -93,6 +93,73 @@ class NewsAdapter:
             logger.error("获取全市场新闻失败", error=str(e))
             raise
 
+    async def get_flash_news(self, limit: int = 100) -> pl.DataFrame:
+        """
+        获取实时快讯新闻（财联社等）
+
+        Args:
+            limit: 获取数量
+
+        Returns:
+            新闻数据 DataFrame
+        """
+        logger.info("获取实时快讯新闻", limit=limit)
+
+        try:
+            # 获取财联社快讯
+            df = await self._run_sync(ak.stock_info_global_cls)
+
+            if df is None or df.empty:
+                logger.warning("实时快讯数据为空")
+                return pl.DataFrame()
+
+            # 转换为 Polars DataFrame
+            result = pl.from_pandas(df)
+
+            # 规范化列名
+            # stock_info_global_cls 返回列：标题, 内容, 发布日期, 发布时间
+            result = result.rename({
+                "标题": "title",
+                "内容": "content",
+                "发布日期": "publish_date",
+                "发布时间": "publish_clock",
+            })
+
+            # 合并日期和时间为 publish_time
+            # 注意：Polars 中处理 Python date/time 对象需要转换
+            result = result.with_columns([
+                (pl.col("publish_date").cast(pl.Utf8) + " " + pl.col("publish_clock").cast(pl.Utf8))
+                .str.to_datetime("%Y-%m-%d %H:%M:%S")
+                .alias("publish_time"),
+                pl.lit("财联社").alias("source"),
+                pl.lit(None).alias("related_stocks"),
+            ])
+
+            # 为快讯生成唯一 URL 防止重复 (publish_time + title hash)
+            result = result.with_columns([
+                ("https://www.cls.cn/flash/" + pl.col("publish_time").cast(pl.Utf8) + pl.col("title")).alias("url")
+            ])
+
+            # 只保留需要的列
+            result = result.select([
+                "title",
+                "content",
+                "source",
+                "publish_time",
+                "url",
+                "related_stocks",
+            ])
+
+            # 按时间降序排序，取最新的 N 条
+            result = result.sort("publish_time", descending=True).head(limit)
+
+            logger.info("获取实时快讯成功", count=len(result))
+            return result
+
+        except Exception as e:
+            logger.error("获取实时快讯失败", error=str(e))
+            raise
+
     async def get_stock_news(
         self,
         code: str,

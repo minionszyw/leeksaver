@@ -58,18 +58,29 @@ class NewsSyncer:
                 start_time = last_sync_time - timedelta(minutes=5)
                 logger.info("增量同步模式", last_sync=last_sync_time, start_time=start_time)
             else:
-                # 冷启动：回溯 24 小时
-                start_time = now - timedelta(hours=24)
+                # 冷启动：回溯 72 小时
+                start_time = now - timedelta(hours=72)
                 logger.info("冷启动模式", start_time=start_time)
 
-            # 获取新闻数据 (使用较大 limit 以确保覆盖时间窗口)
-            # 假设 AkShare 接口一次最多能返回 3000 条左右有效数据
-            FETCH_LIMIT = 3000
-            news_df = await news_adapter.get_market_news(limit=FETCH_LIMIT)
+            # 多源抓取新闻
+            # 1. 获取东方财富全市场新闻
+            news_df = await news_adapter.get_market_news(limit=2000)
+            
+            # 2. 获取财联社实时快讯
+            flash_df = await news_adapter.get_flash_news(limit=1000)
 
-            if news_df is None or len(news_df) == 0:
-                logger.warning("全市场新闻数据为空")
+            # 合并数据源
+            dfs_to_concat = []
+            if news_df is not None and len(news_df) > 0:
+                dfs_to_concat.append(news_df)
+            if flash_df is not None and len(flash_df) > 0:
+                dfs_to_concat.append(flash_df)
+
+            if not dfs_to_concat:
+                logger.warning("所有源的新闻数据均为空")
                 return {"status": "no_data", "synced": 0}
+
+            news_df = pl.concat(dfs_to_concat)
 
             # 统一时区：将 news_df 中的 naive datetime 转换为 UTC
             news_df = news_df.with_columns([
@@ -82,7 +93,7 @@ class NewsSyncer:
             filtered_count = len(news_df)
             
             logger.info(
-                "新闻数据时间过滤",
+                "新闻数据多源合并与时间过滤",
                 start_time=start_time,
                 original=original_count,
                 filtered=filtered_count
