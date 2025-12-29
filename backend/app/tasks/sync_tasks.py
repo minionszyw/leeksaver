@@ -41,28 +41,50 @@ def sync_stock_list(self):
 
 
 @shared_task(bind=True, max_retries=3)
-def sync_daily_quotes(self, codes: list[str] | None = None):
+def sync_daily_quotes(self, codes: list[str] | None = None, is_chunk: bool = False):
     """
     同步日线行情数据 (L1)
 
-    Args:
-        codes: 股票代码列表, None 表示全市场
+    策略：
+    1. 如果没有指定 codes，则获取全市场列表并分片(Chunking)异步执行
+    2. 如果指定了 codes，则直接同步这些股票
     """
     from app.sync.daily_quote_syncer import daily_quote_syncer
+    from app.core.database import get_db_session
+    from app.repositories.stock_repository import StockRepository
 
-    scope = "全市场" if codes is None else f"{len(codes)} 只股票"
+    if codes is None:
+        # 1. 生产者模式：获取全量代码并分片分发任务
+        logger.info("开始全市场同步任务调度（分片模式）")
+        
+        async def get_all_codes():
+            async with get_db_session() as session:
+                repo = StockRepository(session)
+                return await repo.get_all_codes()
+
+        all_codes = run_async(get_all_codes())
+        
+        # 每 100 只股票一个分片
+        chunk_size = 100
+        chunks = [all_codes[i:i + chunk_size] for i in range(0, len(all_codes), chunk_size)]
+        
+        logger.info(f"全市场共 {len(all_codes)} 只标的，切分为 {len(chunks)} 个分片执行")
+        
+        for chunk in chunks:
+            sync_daily_quotes.delay(codes=chunk, is_chunk=True)
+            
+        return {"status": "dispatched", "chunks": len(chunks), "total": len(all_codes)}
+
+    # 2. 消费者模式：执行具体的同步
+    scope = f"分片任务({len(codes)}只)" if is_chunk else f"{len(codes)} 只股票"
     logger.info("开始同步日线行情", scope=scope)
 
     try:
-        if codes:
-            result = run_async(daily_quote_syncer.sync_batch(codes))
-        else:
-            result = run_async(daily_quote_syncer.sync_all())
-
+        result = run_async(daily_quote_syncer.sync_batch(codes, max_concurrent=5))
         logger.info("日线行情同步完成", scope=scope, **result)
         return {"status": "success", "scope": scope, **result}
     except Exception as e:
-        logger.error("日线行情同步失败", error=str(e))
+        logger.error("日线行情同步失败", scope=scope, error=str(e))
         raise self.retry(exc=e, countdown=60)
 
 

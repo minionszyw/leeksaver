@@ -29,17 +29,16 @@ class DailyQuoteSyncer:
         code: str,
         start_date: date | None = None,
         end_date: date | None = None,
+        asset_type: str = "stock",
     ) -> int:
         """
-        同步单只股票日线行情
+        同步单只股票或 ETF 日线行情
 
         Args:
-            code: 股票代码
-            start_date: 起始日期 (默认从最新记录开始)
-            end_date: 结束日期 (默认今天)
-
-        Returns:
-            同步的记录数
+            code: 标的代码
+            start_date: 起始日期
+            end_date: 结束日期
+            asset_type: 资产类型 (stock/etf)
         """
         async with get_db_session() as session:
             repo = MarketDataRepository(session)
@@ -47,11 +46,13 @@ class DailyQuoteSyncer:
             # 确定起始日期
             if start_date is None:
                 latest_date = await repo.get_latest_trade_date(code)
-                if latest_date:
-                    start_date = latest_date + timedelta(days=1)
-                else:
-                    # 无历史数据，获取最近 2 年
+                quote_count = await repo.get_quote_count(code)
+                
+                # 如果完全没数据，或者数据量太少（可能只有快照），强制补全 2 年历史
+                if not latest_date or quote_count < 10:
                     start_date = date.today() - timedelta(days=730)
+                else:
+                    start_date = latest_date + timedelta(days=1)
 
             if end_date is None:
                 end_date = date.today()
@@ -63,7 +64,9 @@ class DailyQuoteSyncer:
 
             # 获取行情数据
             try:
-                df = await akshare_adapter.get_daily_quotes(code, start_date, end_date)
+                df = await akshare_adapter.get_daily_quotes(
+                    code, start_date, end_date, asset_type=asset_type
+                )
 
                 if len(df) == 0:
                     logger.debug("无新数据", code=code)
@@ -87,20 +90,7 @@ class DailyQuoteSyncer:
         max_concurrent: int = 10,
     ) -> dict:
         """
-        批量同步日线行情（并发版本）
-
-        性能优化：
-        - 使用 asyncio.gather() 并发执行
-        - Semaphore 限制并发数避免触发限频
-        - 预期性能提升：10 倍（100 只股票从 2+ 分钟降至 15 秒）
-
-        Args:
-            codes: 股票代码列表
-            progress_callback: 进度回调函数 (current, total)
-            max_concurrent: 最大并发数（默认 10）
-
-        Returns:
-            同步结果统计
+        批量同步日线行情
         """
         total = len(codes)
         stats = {
@@ -110,53 +100,46 @@ class DailyQuoteSyncer:
             "records": 0,
         }
 
+        # 批量获取资产类型以优化性能
+        async with get_db_session() as session:
+            stock_repo = StockRepository(session)
+            asset_types = await stock_repo.get_asset_types_map(codes)
+
         logger.info("开始并发批量同步日线行情", total=total, max_concurrent=max_concurrent)
 
         # 使用 Semaphore 限制并发数
         semaphore = asyncio.Semaphore(max_concurrent)
         completed = 0
         success_codes = []
-        failed_codes = []
 
         async def sync_with_semaphore(code: str):
             nonlocal completed
             async with semaphore:
                 try:
-                    count = await self.sync_single(code)
+                    asset_type = asset_types.get(code, "stock")
+                    count = await self.sync_single(code, asset_type=asset_type)
                     stats["records"] += count
                     stats["success"] += 1
                     success_codes.append(code)
                 except Exception as e:
                     stats["failed"] += 1
-                    failed_codes.append(code)
-
-                    # 记录错误到数据库
                     await self._record_sync_error(
                         task_name="sync_daily_quotes",
                         target_code=code,
                         error=e
                     )
-
                     logger.warning("同步失败", code=code, error=str(e))
                 finally:
                     completed += 1
                     if progress_callback:
                         progress_callback(completed, total)
 
-        # 并发执行所有任务
+        # 并发执行
         tasks = [sync_with_semaphore(code) for code in codes]
         await asyncio.gather(*tasks)
 
-        # 标记成功同步的股票错误为已解决
         if success_codes:
             await self._mark_errors_resolved(success_codes)
-
-        logger.info(
-            "并发批量同步日线行情完成",
-            success=stats["success"],
-            failed=stats["failed"],
-            records=stats["records"],
-        )
 
         return stats
 

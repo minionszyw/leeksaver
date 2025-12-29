@@ -79,8 +79,23 @@ class StockRepository(BaseRepository[Stock]):
         query = select(Stock.code).where(Stock.is_active == True)
         if asset_type:
             query = query.where(Stock.asset_type == asset_type)
+        
         result = await self.session.execute(query)
-        return [row[0] for row in result.all()]
+        return [row[0] for row in result.fetchall()]
+
+    async def get_asset_types_map(self, codes: list[str]) -> dict[str, str]:
+        """
+        批量获取资产类型映射
+
+        Args:
+            codes: 代码列表
+
+        Returns:
+            dict: {code: asset_type}
+        """
+        query = select(Stock.code, Stock.asset_type).where(Stock.code.in_(codes))
+        result = await self.session.execute(query)
+        return {row[0]: row[1] for row in result.fetchall()}
 
 
 class WatchlistRepository:

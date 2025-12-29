@@ -59,9 +59,17 @@ class AkShareAdapter(DataSourceBase):
 
     @retry_with_backoff(retries=3, backoff_in_seconds=1)
     async def _run_sync(self, func, *args, **kwargs):
-        """在线程池中运行同步函数"""
+        """在线程池中运行同步函数，并增加硬超时保护"""
         async with akshare_limiter:
-            return await asyncio.to_thread(func, *args, **kwargs)
+            try:
+                # 增加 30 秒硬超时，防止网络层挂起导致线程被无限占用
+                return await asyncio.wait_for(
+                    asyncio.to_thread(func, *args, **kwargs),
+                    timeout=30.0
+                )
+            except asyncio.TimeoutError:
+                logger.error(f"接口调用超时 (30s): {func.__name__}")
+                raise
 
     async def get_stock_list(self) -> pl.DataFrame:
         """
@@ -142,11 +150,16 @@ class AkShareAdapter(DataSourceBase):
         code: str,
         start_date: date | None = None,
         end_date: date | None = None,
+        asset_type: str = "stock",
     ) -> pl.DataFrame:
         """
-        获取股票日线行情
+        获取股票或 ETF 日线行情
 
-        使用 stock_zh_a_hist 接口
+        Args:
+            code: 标的代码
+            start_date: 起始日期
+            end_date: 结束日期
+            asset_type: 资产类型 (stock/etf)
         """
         # 默认获取最近 2 年数据
         if start_date is None:
@@ -157,48 +170,75 @@ class AkShareAdapter(DataSourceBase):
         logger.debug(
             "获取日线行情",
             code=code,
+            asset_type=asset_type,
             start_date=start_date.isoformat(),
             end_date=end_date.isoformat(),
         )
 
         try:
-            # 调用 AkShare 接口
-            df = await self._run_sync(
-                ak.stock_zh_a_hist,
-                symbol=code,
-                period="daily",
-                start_date=start_date.strftime("%Y%m%d"),
-                end_date=end_date.strftime("%Y%m%d"),
-                adjust="qfq",  # 前复权
-            )
+            # 根据资产类型选择接口
+            if asset_type == "etf":
+                df = await self._run_sync(
+                    ak.fund_etf_hist_em,
+                    symbol=code,
+                    period="daily",
+                    start_date=start_date.strftime("%Y%m%d"),
+                    end_date=end_date.strftime("%Y%m%d"),
+                    adjust="qfq",
+                )
+            else:
+                df = await self._run_sync(
+                    ak.stock_zh_a_hist,
+                    symbol=code,
+                    period="daily",
+                    start_date=start_date.strftime("%Y%m%d"),
+                    end_date=end_date.strftime("%Y%m%d"),
+                    adjust="qfq",
+                )
 
             if df is None or df.empty:
-                logger.warning("日线行情数据为空", code=code)
+                logger.warning("日线行情数据为空", code=code, asset_type=asset_type)
                 return pl.DataFrame()
 
             # 转换为 Polars DataFrame
             result = pl.from_pandas(df)
 
             # 规范化列名
-            # 处理日期列：如果是 date 类型直接使用，如果是字符串则转换
-            date_col = result["日期"]
-            if date_col.dtype == pl.Date:
-                trade_date_expr = pl.col("日期").alias("trade_date")
-            else:
-                trade_date_expr = pl.col("日期").str.to_date("%Y-%m-%d").alias("trade_date")
+            # ETF 接口返回列名可能略有不同，统一进行映射
+            rename_map = {
+                "日期": "trade_date",
+                "开盘": "open",
+                "最高": "high",
+                "最低": "low",
+                "收盘": "close",
+                "成交量": "volume",
+                "成交额": "amount",
+                "涨跌额": "change",
+                "涨跌幅": "change_pct",
+                "换手率": "turnover_rate",
+            }
+            
+            # 过滤出存在的列进行重命名
+            existing_renames = {k: v for k, v in rename_map.items() if k in result.columns}
+            result = result.rename(existing_renames)
 
+            # 处理日期格式
+            if result["trade_date"].dtype != pl.Date:
+                result = result.with_columns(pl.col("trade_date").str.to_date("%Y-%m-%d"))
+
+            # 选择并强制转换类型
             result = result.select(
                 pl.lit(code).alias("code"),
-                trade_date_expr,
-                pl.col("开盘").cast(pl.Decimal(10, 2)).alias("open"),
-                pl.col("最高").cast(pl.Decimal(10, 2)).alias("high"),
-                pl.col("最低").cast(pl.Decimal(10, 2)).alias("low"),
-                pl.col("收盘").cast(pl.Decimal(10, 2)).alias("close"),
-                pl.col("成交量").cast(pl.Int64).alias("volume"),
-                pl.col("成交额").cast(pl.Decimal(18, 2)).alias("amount"),
-                pl.col("涨跌额").cast(pl.Decimal(10, 2)).alias("change"),
-                pl.col("涨跌幅").cast(pl.Decimal(8, 4)).alias("change_pct"),
-                pl.col("换手率").cast(pl.Decimal(8, 4)).alias("turnover_rate"),
+                pl.col("trade_date"),
+                pl.col("open").cast(pl.Decimal(10, 2)).alias("open"),
+                pl.col("high").cast(pl.Decimal(10, 2)).alias("high"),
+                pl.col("low").cast(pl.Decimal(10, 2)).alias("low"),
+                pl.col("close").cast(pl.Decimal(10, 2)).alias("close"),
+                pl.col("volume").cast(pl.Int64).alias("volume"),
+                pl.col("amount").cast(pl.Decimal(18, 2)).alias("amount"),
+                pl.col("change").cast(pl.Decimal(10, 2)).alias("change"),
+                pl.col("change_pct").cast(pl.Decimal(8, 4)).alias("change_pct"),
+                pl.col("turnover_rate").cast(pl.Decimal(8, 4)).alias("turnover_rate"),
             )
 
             # 数据清洗：过滤掉关键字段为空或为 0 的记录

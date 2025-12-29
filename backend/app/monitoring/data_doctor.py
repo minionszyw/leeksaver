@@ -2,14 +2,15 @@
 数据医生 - 数据健康巡检系统
 
 功能：
-- 每日自动巡检数据覆盖率、新鲜度、完整性、质量
-- 覆盖率 < 95% 时告警并触发自动修复
-- 生成巡检报告
+- 每日自动巡检数据覆盖率 (Stock & ETF)、新鲜度、完整性、质量
+- 精准定位缺失数据的标的代码
+- 触发针对性的自动修复任务
+- 生成详细巡检报告
 """
 
 from datetime import date, timedelta, datetime
 from dataclasses import dataclass
-from typing import List
+from typing import List, Dict, Set
 
 from sqlalchemy import select, func, and_, distinct
 
@@ -17,12 +18,7 @@ from app.core.database import get_db_session
 from app.core.logging import get_logger
 from app.models.stock import Stock
 from app.models.market_data import DailyQuote
-from app.models.financial import FinancialStatement
-from app.models.news import NewsArticle
-from app.models.valuation import DailyValuation
 from app.repositories.stock_repository import StockRepository
-from app.repositories.market_data_repository import MarketDataRepository
-from app.repositories.financial_repository import FinancialRepository
 
 logger = get_logger(__name__)
 
@@ -44,37 +40,37 @@ class DataDoctor:
 
     def __init__(self):
         self.results: List[HealthCheckResult] = []
+        self.missing_codes: Dict[str, List[str]] = {"stock": [], "etf": []}
 
     async def run_daily_health_check(self) -> List[HealthCheckResult]:
         """
         执行每日数据健康检查
-
-        Returns:
-            巡检结果列表
         """
         logger.info("=" * 60)
-        logger.info("开始数据健康巡检")
+        logger.info("开始数据健康巡检 (智能版)")
         logger.info("=" * 60)
 
         self.results = []
+        self.missing_codes = {"stock": [], "etf": []}
 
-        # 检查 1: 日线行情覆盖率
-        await self._check_quote_coverage()
+        # 1. 检查日线行情覆盖率 (分别针对股票和 ETF)
+        await self._check_quote_coverage("stock")
+        await self._check_quote_coverage("etf")
 
-        # 检查 2: 数据新鲜度
+        # 2. 检查数据新鲜度
         await self._check_data_freshness()
 
-        # 检查 3: 元数据完整性
+        # 3. 检查元数据完整性
         await self._check_metadata_completeness()
 
-        # 检查 4: 数据质量（异常值检测）
+        # 4. 检查数据质量
         await self._check_data_quality()
 
         # 生成报告
         self._generate_report()
 
-        # 自动修复
-        await self._auto_repair()
+        # 5. 精准自动修复
+        await self._auto_repair_smart()
 
         logger.info("=" * 60)
         logger.info("数据健康巡检完成")
@@ -82,423 +78,169 @@ class DataDoctor:
 
         return self.results
 
-    async def _check_quote_coverage(self) -> HealthCheckResult:
+    async def _check_quote_coverage(self, asset_type: str) -> HealthCheckResult:
         """
-        检查日线行情覆盖率
-
-        标准：昨日行情覆盖率 > 95%
+        检查指定类型的日线行情覆盖率，并记录缺失的代码
         """
-        logger.info("检查 1/4: 日线行情覆盖率")
+        logger.info(f"巡检: {asset_type.upper()} 行情覆盖率")
 
         try:
             async with get_db_session() as session:
-                # 获取总股票数
-                total_result = await session.execute(
-                    select(func.count(Stock.code)).where(
-                        and_(Stock.asset_type == "stock", Stock.is_active == True)
-                    )
+                # 获取该类型的所有活跃代码
+                all_codes_stmt = select(Stock.code).where(
+                    and_(Stock.asset_type == asset_type, Stock.is_active == True)
                 )
-                total_stocks = total_result.scalar() or 0
+                all_codes_result = await session.execute(all_codes_stmt)
+                all_codes = {row[0] for row in all_codes_result.fetchall()}
+                total_count = len(all_codes)
 
-                if total_stocks == 0:
-                    result = HealthCheckResult(
-                        metric_name="quote_coverage",
-                        status="warning",
-                        value=0.0,
-                        threshold=0.95,
-                        message="⚠️  股票总数为 0，请先同步股票列表",
+                if total_count == 0:
+                    return self._add_result(
+                        f"{asset_type}_coverage", "healthy", 1.0, 0.95, f"✅ 无活跃 {asset_type} 标的"
                     )
-                    self.results.append(result)
-                    return result
 
-                # 获取昨日日期（考虑周末）
-                latest_date = date.today() - timedelta(days=1)
-                if latest_date.weekday() >= 5:  # 周六或周日
-                    # 回溯到上周五
-                    days_back = latest_date.weekday() - 4
-                    latest_date = latest_date - timedelta(days=days_back)
+                # 确定最近交易日
+                check_date = self._get_latest_check_date()
 
-                # 获取昨日有行情的股票数
-                quote_result = await session.execute(
-                    select(func.count(distinct(DailyQuote.code))).where(
-                        DailyQuote.trade_date == latest_date
-                    )
+                # 获取该交易日有数据的代码
+                synced_stmt = select(DailyQuote.code).where(
+                    and_(DailyQuote.trade_date == check_date, DailyQuote.code.in_(list(all_codes)))
                 )
-                quote_count = quote_result.scalar() or 0
+                synced_result = await session.execute(synced_stmt)
+                synced_codes = {row[0] for row in synced_result.fetchall()}
+                synced_count = len(synced_codes)
 
-                # 计算覆盖率
-                coverage = quote_count / total_stocks if total_stocks > 0 else 0
+                # 找出缺失的代码
+                missing = list(all_codes - synced_codes)
+                self.missing_codes[asset_type] = missing
 
-                # 判断状态
-                if coverage >= 0.95:
-                    status = "healthy"
-                    icon = "✅"
-                elif coverage >= 0.80:
-                    status = "warning"
-                    icon = "⚠️"
-                else:
-                    status = "critical"
-                    icon = "❌"
+                coverage = synced_count / total_count if total_count > 0 else 0
+                
+                status = "healthy" if coverage >= 0.95 else ("warning" if coverage >= 0.8 else "critical")
+                icon = "✅" if status == "healthy" else ("⚠️" if status == "warning" else "❌")
 
-                result = HealthCheckResult(
-                    metric_name="quote_coverage",
-                    status=status,
-                    value=coverage,
-                    threshold=0.95,
-                    message=f"{icon} 日线行情覆盖率: {coverage*100:.1f}% ({quote_count}/{total_stocks})",
-                    details={
-                        "total_stocks": total_stocks,
-                        "quote_count": quote_count,
-                        "check_date": str(latest_date),
-                    },
+                return self._add_result(
+                    f"{asset_type}_coverage",
+                    status,
+                    coverage,
+                    0.95,
+                    f"{icon} {asset_type.upper()} 覆盖率: {coverage*100:.1f}% ({synced_count}/{total_count})",
+                    {"missing_count": len(missing), "check_date": str(check_date)}
                 )
-
-                self.results.append(result)
-                logger.info(result.message)
-                return result
 
         except Exception as e:
-            logger.error(f"检查日线行情覆盖率失败: {e}")
-            result = HealthCheckResult(
-                metric_name="quote_coverage",
-                status="critical",
-                value=0.0,
-                threshold=0.95,
-                message=f"❌ 检查失败: {e}",
-            )
-            self.results.append(result)
-            return result
+            logger.error(f"检查 {asset_type} 覆盖率失败: {e}")
+            return self._add_result(f"{asset_type}_coverage", "critical", 0, 0.95, f"❌ 检查失败: {e}")
+
+    def _get_latest_check_date(self) -> date:
+        """获取最近一个应该有数据的交易日"""
+        target = date.today() - timedelta(days=1)
+        # 简单跳过周末，节假日逻辑未来可接入交易日历
+        while target.weekday() >= 5:
+            target -= timedelta(days=1)
+        return target
+
+    def _add_result(self, name, status, value, threshold, message, details=None):
+        res = HealthCheckResult(name, status, value, threshold, message, details)
+        self.results.append(res)
+        logger.info(message)
+        return res
 
     async def _check_data_freshness(self) -> HealthCheckResult:
         """
-        检查数据新鲜度（最新交易日是否为昨天或最近交易日）
-
-        标准：最新数据日期距今 <= 3 天（考虑周末和节假日）
+        检查数据新鲜度
         """
-        logger.info("检查 2/4: 数据新鲜度")
-
         try:
             async with get_db_session() as session:
-                # 获取最新行情日期
-                latest_result = await session.execute(
-                    select(func.max(DailyQuote.trade_date))
-                )
+                latest_result = await session.execute(select(func.max(DailyQuote.trade_date)))
                 latest_date = latest_result.scalar()
 
                 if not latest_date:
-                    result = HealthCheckResult(
-                        metric_name="data_freshness",
-                        status="critical",
-                        value=0.0,
-                        threshold=3.0,
-                        message="❌ 无任何行情数据",
-                    )
-                    self.results.append(result)
-                    return result
+                    return self._add_result("freshness", "critical", 0, 1, "❌ 数据库无任何行情数据")
 
-                # 计算距今天数
-                today = date.today()
-                days_diff = (today - latest_date).days
+                days_diff = (date.today() - latest_date).days
+                max_allowed = 3 if date.today().weekday() == 0 else 1 # 周一允许3天，平时允许1天
 
-                # 判断状态（考虑周末）
-                max_days = 3
-                if today.weekday() == 0:  # 周一，允许 3 天
-                    max_days = 3
-                elif today.weekday() == 6:  # 周日，允许 2 天
-                    max_days = 2
-
-                if days_diff <= 1:
-                    status = "healthy"
-                    icon = "✅"
-                elif days_diff <= max_days:
-                    status = "warning"
-                    icon = "⚠️"
-                else:
-                    status = "critical"
-                    icon = "❌"
-
-                result = HealthCheckResult(
-                    metric_name="data_freshness",
-                    status=status,
-                    value=float(days_diff),
-                    threshold=float(max_days),
-                    message=f"{icon} 数据新鲜度: 最新数据 {latest_date} (距今 {days_diff} 天)",
-                    details={"latest_date": str(latest_date), "days_diff": days_diff},
+                status = "healthy" if days_diff <= max_allowed else "critical"
+                icon = "✅" if status == "healthy" else "❌"
+                
+                return self._add_result(
+                    "freshness", status, float(days_diff), float(max_allowed),
+                    f"{icon} 数据新鲜度: 最新日期 {latest_date} (距今 {days_diff} 天)"
                 )
-
-                self.results.append(result)
-                logger.info(result.message)
-                return result
-
         except Exception as e:
-            logger.error(f"检查数据新鲜度失败: {e}")
-            result = HealthCheckResult(
-                metric_name="data_freshness",
-                status="critical",
-                value=999.0,
-                threshold=3.0,
-                message=f"❌ 检查失败: {e}",
-            )
-            self.results.append(result)
-            return result
+            return self._add_result("freshness", "critical", 99, 1, f"❌ 检查新鲜度失败: {e}")
 
     async def _check_metadata_completeness(self) -> HealthCheckResult:
         """
-        检查元数据完整性（industry 字段非空比例）
-
-        标准：行业字段非空率 > 90%
+        检查行业元数据完整性
         """
-        logger.info("检查 3/4: 元数据完整性")
-
         try:
             async with get_db_session() as session:
-                # 总股票数
-                total_result = await session.execute(
-                    select(func.count(Stock.code)).where(
-                        and_(Stock.asset_type == "stock", Stock.is_active == True)
-                    )
+                total = (await session.execute(select(func.count(Stock.code)).where(Stock.is_active == True))).scalar() or 0
+                with_industry = (await session.execute(select(func.count(Stock.code)).where(
+                    and_(Stock.is_active == True, Stock.industry.isnot(None), Stock.industry != "")
+                ))).scalar() or 0
+
+                ratio = with_industry / total if total > 0 else 1
+                status = "healthy" if ratio >= 0.9 else "warning"
+                
+                return self._add_result(
+                    "metadata", status, ratio, 0.9,
+                    f"{'✅' if status == 'healthy' else '⚠️'} 元数据完整性: 行业覆盖率 {ratio*100:.1f}%"
                 )
-                total_stocks = total_result.scalar() or 0
-
-                if total_stocks == 0:
-                    result = HealthCheckResult(
-                        metric_name="metadata_completeness",
-                        status="warning",
-                        value=0.0,
-                        threshold=0.90,
-                        message="⚠️  股票总数为 0",
-                    )
-                    self.results.append(result)
-                    return result
-
-                # 有行业信息的股票数
-                with_industry_result = await session.execute(
-                    select(func.count(Stock.code)).where(
-                        and_(
-                            Stock.asset_type == "stock",
-                            Stock.is_active == True,
-                            Stock.industry.isnot(None),
-                            Stock.industry != "",
-                        )
-                    )
-                )
-                with_industry = with_industry_result.scalar() or 0
-
-                # 计算完整率
-                completeness = with_industry / total_stocks if total_stocks > 0 else 0
-
-                # 判断状态
-                if completeness >= 0.90:
-                    status = "healthy"
-                    icon = "✅"
-                elif completeness >= 0.70:
-                    status = "warning"
-                    icon = "⚠️"
-                else:
-                    status = "critical"
-                    icon = "❌"
-
-                result = HealthCheckResult(
-                    metric_name="metadata_completeness",
-                    status=status,
-                    value=completeness,
-                    threshold=0.90,
-                    message=f"{icon} 元数据完整性: 行业字段非空率 {completeness*100:.1f}% ({with_industry}/{total_stocks})",
-                    details={
-                        "total_stocks": total_stocks,
-                        "with_industry": with_industry,
-                    },
-                )
-
-                self.results.append(result)
-                logger.info(result.message)
-                return result
-
         except Exception as e:
-            logger.error(f"检查元数据完整性失败: {e}")
-            result = HealthCheckResult(
-                metric_name="metadata_completeness",
-                status="critical",
-                value=0.0,
-                threshold=0.90,
-                message=f"❌ 检查失败: {e}",
-            )
-            self.results.append(result)
-            return result
+            return self._add_result("metadata", "critical", 0, 0.9, f"❌ 检查元数据失败: {e}")
 
     async def _check_data_quality(self) -> HealthCheckResult:
-        """
-        检查数据质量（异常值检测）
-
-        检查项：
-        - 价格异常（收盘价 <= 0）
-        - 成交量异常（成交量 <= 0）
-        """
-        logger.info("检查 4/4: 数据质量")
-
+        """检查最近数据是否有 0 值或空值"""
         try:
             async with get_db_session() as session:
-                # 获取最近 5 天的数据
-                check_date = date.today() - timedelta(days=5)
-
-                # 检查异常价格
-                abnormal_price_result = await session.execute(
-                    select(func.count(DailyQuote.code)).where(
-                        and_(
-                            DailyQuote.trade_date >= check_date,
-                            (DailyQuote.close <= 0) | (DailyQuote.close.is_(None)),
-                        )
-                    )
+                check_date = date.today() - timedelta(days=3)
+                abnormal = (await session.execute(select(func.count(DailyQuote.code)).where(
+                    and_(DailyQuote.trade_date >= check_date, (DailyQuote.close <= 0) | (DailyQuote.volume <= 0))
+                ))).scalar() or 0
+                
+                status = "healthy" if abnormal == 0 else "warning"
+                return self._add_result(
+                    "quality", status, float(abnormal), 0,
+                    f"{'✅' if status == 'healthy' else '⚠️'} 数据质量: 发现 {abnormal} 条异常记录 (最近3天)"
                 )
-                abnormal_price = abnormal_price_result.scalar() or 0
-
-                # 检查异常成交量
-                abnormal_volume_result = await session.execute(
-                    select(func.count(DailyQuote.code)).where(
-                        and_(
-                            DailyQuote.trade_date >= check_date,
-                            (DailyQuote.volume <= 0) | (DailyQuote.volume.is_(None)),
-                        )
-                    )
-                )
-                abnormal_volume = abnormal_volume_result.scalar() or 0
-
-                # 总记录数
-                total_result = await session.execute(
-                    select(func.count(DailyQuote.code)).where(
-                        DailyQuote.trade_date >= check_date
-                    )
-                )
-                total_records = total_result.scalar() or 0
-
-                # 计算异常率
-                total_abnormal = abnormal_price + abnormal_volume
-                abnormal_rate = (
-                    total_abnormal / total_records if total_records > 0 else 0
-                )
-
-                # 判断状态
-                if abnormal_rate <= 0.01:  # 异常率 < 1%
-                    status = "healthy"
-                    icon = "✅"
-                elif abnormal_rate <= 0.05:  # 异常率 < 5%
-                    status = "warning"
-                    icon = "⚠️"
-                else:
-                    status = "critical"
-                    icon = "❌"
-
-                result = HealthCheckResult(
-                    metric_name="data_quality",
-                    status=status,
-                    value=abnormal_rate,
-                    threshold=0.01,
-                    message=f"{icon} 数据质量: 异常率 {abnormal_rate*100:.2f}% (异常价格 {abnormal_price}, 异常成交量 {abnormal_volume})",
-                    details={
-                        "total_records": total_records,
-                        "abnormal_price": abnormal_price,
-                        "abnormal_volume": abnormal_volume,
-                        "check_period_days": 5,
-                    },
-                )
-
-                self.results.append(result)
-                logger.info(result.message)
-                return result
-
         except Exception as e:
-            logger.error(f"检查数据质量失败: {e}")
-            result = HealthCheckResult(
-                metric_name="data_quality",
-                status="warning",
-                value=0.0,
-                threshold=0.01,
-                message=f"⚠️  检查失败: {e}",
-            )
-            self.results.append(result)
-            return result
+            return self._add_result("quality", "critical", 1, 0, f"❌ 检查质量失败: {e}")
 
     def _generate_report(self):
-        """生成巡检报告"""
-        logger.info("")
-        logger.info("=" * 60)
-        logger.info("📊 数据健康巡检报告")
-        logger.info("=" * 60)
-        logger.info(f"巡检时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        logger.info("")
+        """打印巡检总结报告"""
+        logger.info("\n" + "="*40 + "\n📊 数据健康巡检总结报告\n" + "="*40)
+        for r in self.results:
+            logger.info(f"[{r.status.upper():<8}] {r.message}")
+        logger.info("="*40)
 
-        # 统计各状态数量
-        healthy_count = sum(1 for r in self.results if r.status == "healthy")
-        warning_count = sum(1 for r in self.results if r.status == "warning")
-        critical_count = sum(1 for r in self.results if r.status == "critical")
-
-        # 总体状态
-        if critical_count > 0:
-            overall_status = "❌ 严重"
-        elif warning_count > 0:
-            overall_status = "⚠️  警告"
-        else:
-            overall_status = "✅ 健康"
-
-        logger.info(f"总体状态: {overall_status}")
-        logger.info(
-            f"检查项: {len(self.results)} 项 (健康 {healthy_count}, 警告 {warning_count}, 严重 {critical_count})"
-        )
-        logger.info("")
-        logger.info("详细结果:")
-        logger.info("-" * 60)
-
-        for result in self.results:
-            logger.info(f"  {result.message}")
-
-        logger.info("=" * 60)
-
-    async def _auto_repair(self):
+    async def _auto_repair_smart(self):
         """
-        自动修复（触发补录任务）
-
-        修复策略:
-        - 日线行情覆盖率 < 95%: 触发全市场同步
-        - 元数据完整性 < 90%: 触发股票列表同步
+        智能自动修复：精准补录缺失代码
         """
-        logger.info("")
-        logger.info("🔧 自动修复检测")
-        logger.info("-" * 60)
+        all_missing = self.missing_codes["stock"] + self.missing_codes["etf"]
+        
+        if not all_missing:
+            logger.info("✅ 巡检通过，无需执行智能修复")
+            return
 
-        repair_triggered = False
-
-        for result in self.results:
-            if result.status == "critical":
-                logger.warning(f"检测到严重问题: {result.metric_name}")
-
-                if result.metric_name == "quote_coverage":
-                    # 触发全市场日线同步
-                    logger.info("⚙️  触发全市场日线行情同步...")
-                    try:
-                        from app.tasks.sync_tasks import sync_daily_quotes
-
-                        sync_daily_quotes.delay()
-                        logger.info("✅ 已触发全市场日线行情同步任务")
-                        repair_triggered = True
-                    except Exception as e:
-                        logger.error(f"触发同步任务失败: {e}")
-
-                elif result.metric_name == "metadata_completeness":
-                    # 触发股票列表同步
-                    logger.info("⚙️  触发股票列表同步...")
-                    try:
-                        from app.tasks.sync_tasks import sync_stock_list
-
-                        sync_stock_list.delay()
-                        logger.info("✅ 已触发股票列表同步任务")
-                        repair_triggered = True
-                    except Exception as e:
-                        logger.error(f"触发同步任务失败: {e}")
-
-        if not repair_triggered:
-            logger.info("✅ 无需自动修复")
-
-        logger.info("-" * 60)
+        logger.info(f"🔧 启动智能修复: 发现 {len(all_missing)} 只标的数据缺失")
+        
+        try:
+            from app.tasks.sync_tasks import sync_daily_quotes
+            
+            # 使用分片任务进行精准补录
+            # 每 100 只一组，利用我们之前增强的 sync_daily_quotes 逻辑
+            chunk_size = 100
+            for i in range(0, len(all_missing), chunk_size):
+                chunk = all_missing[i : i + chunk_size]
+                sync_daily_quotes.delay(codes=chunk, is_chunk=True)
+            
+            logger.info(f"🚀 已下发 {len(all_missing)} 只标的的补录任务 (共 { (len(all_missing)//chunk_size) + 1 } 个分片)")
+        except Exception as e:
+            logger.error(f"❌ 智能修复任务下发失败: {e}")
 
 
 # 全局单例
