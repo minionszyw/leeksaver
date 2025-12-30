@@ -33,25 +33,32 @@ class ValuationSyncer:
 
         try:
             # 获取全市场估值数据
-            df = await valuation_adapter.get_all_valuations(trade_date)
+            result_data = await valuation_adapter.get_all_valuations(trade_date)
 
-            # 容错：检查是否为有效的 Polars DataFrame (周末或接口异常可能返回 dict 或 None)
-            if not isinstance(df, pl.DataFrame) or len(df) == 0:
+            # 容错：检查是否为有效的列表或 Polars DataFrame
+            # 由于使用了缓存装饰器，这里可能返回 dict {"data": [...], "columns": [...]}
+            if isinstance(result_data, dict) and "data" in result_data:
+                records_raw = result_data["data"]
+            elif isinstance(result_data, pl.DataFrame):
+                records_raw = result_data.to_dicts()
+            else:
                 logger.warning("未获取到全市场估值数据，可能为非交易日或接口限频", trade_date=str(trade_date))
                 return {"status": "no_data", "synced": 0}
 
-            # 分批处理
-            batch_size = settings.valuation_batch_size
-            records = []
+            if not records_raw:
+                logger.warning("估值数据为空", trade_date=str(trade_date))
+                return {"status": "no_data", "synced": 0}
 
-            for row in df.iter_rows(named=True):
+            # 处理数据格式
+            records = []
+            for row in records_raw:
                 records.append({
                     "code": row["code"],
                     "trade_date": row["trade_date"],
-                    "pe_ttm": Decimal(str(row["pe_ttm"])) if row["pe_ttm"] else None,
-                    "pb": Decimal(str(row["pb"])) if row["pb"] else None,
-                    "total_mv": Decimal(str(row["total_mv"])) if row["total_mv"] else None,
-                    "circ_mv": Decimal(str(row["circ_mv"])) if row["circ_mv"] else None,
+                    "pe_ttm": Decimal(str(row["pe_ttm"])) if row.get("pe_ttm") else None,
+                    "pb": Decimal(str(row["pb"])) if row.get("pb") else None,
+                    "total_mv": Decimal(str(row["total_mv"])) if row.get("total_mv") else None,
+                    "circ_mv": Decimal(str(row["circ_mv"])) if row.get("circ_mv") else None,
                 })
 
             # 批量存储
@@ -59,13 +66,13 @@ class ValuationSyncer:
             async with get_db_session() as session:
                 repo = ValuationRepository(session)
 
-                for i in range(0, len(records), batch_size):
-                    batch = records[i:i + batch_size]
+                for i in range(0, len(records), settings.valuation_batch_size):
+                    batch = records[i:i + settings.valuation_batch_size]
                     count = await repo.upsert_many(batch)
                     total_synced += count
 
                     # 避免过快写入
-                    if i + batch_size < len(records):
+                    if i + settings.valuation_batch_size < len(records):
                         await asyncio.sleep(0.1)
 
             logger.info("估值数据同步完成", count=total_synced)

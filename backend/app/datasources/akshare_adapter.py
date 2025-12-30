@@ -531,6 +531,85 @@ class AkShareAdapter(DataSourceBase):
             logger.error("获取财务数据失败", code=code, error=str(e))
             raise
 
+    async def get_operation_data(self, code: str) -> pl.DataFrame:
+        """
+        获取股票主营构成数据
+
+        使用 stock_zygc_em 接口
+        """
+        logger.debug("获取主营构成数据", code=code)
+
+        try:
+            df = await self._run_sync(ak.stock_zygc_em, symbol=code)
+
+            if df is None or df.empty:
+                logger.warning("主营构成数据为空", code=code)
+                return pl.DataFrame()
+
+            result = pl.from_pandas(df)
+            
+            # 规范化列名
+            # 接口返回: 报告期, 分类, 主营收入, 收入比例, 主营利润, 利润比例, 毛利率
+            result = result.select([
+                pl.lit(code).alias("code"),
+                pl.col("报告期").str.to_date("%Y-%m-%d").alias("end_date"),
+                pl.col("分类").alias("item_name"),
+                pl.col("主营收入").cast(pl.Float64, strict=False).cast(pl.Decimal(20, 2)).alias("revenue"),
+                pl.col("收入比例").str.replace("%", "").cast(pl.Float64, strict=False).cast(pl.Decimal(10, 4)).alias("revenue_ratio"),
+                pl.col("主营利润").cast(pl.Float64, strict=False).cast(pl.Decimal(20, 2)).alias("profit"),
+                pl.col("利润比例").str.replace("%", "").cast(pl.Float64, strict=False).cast(pl.Decimal(10, 4)).alias("profit_ratio"),
+                pl.col("毛利率").str.replace("%", "").cast(pl.Float64, strict=False).cast(pl.Decimal(10, 4)).alias("gross_margin"),
+            ])
+            
+            # 添加业务类型（从项目名称推断）
+            result = result.with_columns(
+                pl.when(pl.col("item_name").str.contains("行业"))
+                .then(pl.lit("industry"))
+                .when(pl.col("item_name").str.contains("产品"))
+                .then(pl.lit("product"))
+                .when(pl.col("item_name").str.contains("地区"))
+                .then(pl.lit("region"))
+                .otherwise(pl.lit("other"))
+                .alias("item_type")
+            )
+
+            logger.debug("获取主营构成成功", code=code, count=len(result))
+            return result
+        except Exception as e:
+            logger.error("获取主营构成失败", code=code, error=str(e))
+            raise
+
+    async def get_stock_valuation(self, code: str) -> pl.DataFrame:
+        """
+        获取个股估值指标 (PE, PB, PS等)
+
+        使用 stock_a_lg_indicator 接口
+        """
+        logger.debug("获取个股估值指标", code=code)
+        try:
+            df = await self._run_sync(ak.stock_a_lg_indicator, symbol=code)
+            if df is None or df.empty:
+                return pl.DataFrame()
+            
+            result = pl.from_pandas(df)
+            # 接口返回: trade_date, pe, pe_ttm, pb, ps, ps_ttm, dv_ratio, dv_ttm, total_mv
+            result = result.select([
+                pl.lit(code).alias("code"),
+                pl.col("trade_date").str.to_date("%Y-%m-%d"),
+                pl.col("pe").cast(pl.Float64, strict=False).cast(pl.Decimal(10, 4)),
+                pl.col("pe_ttm").cast(pl.Float64, strict=False).cast(pl.Decimal(10, 4)),
+                pl.col("pb").cast(pl.Float64, strict=False).cast(pl.Decimal(10, 4)),
+                pl.col("ps").cast(pl.Float64, strict=False).cast(pl.Decimal(10, 4)),
+                pl.col("ps_ttm").cast(pl.Float64, strict=False).cast(pl.Decimal(10, 4)),
+                pl.col("dv_ratio").cast(pl.Float64, strict=False).cast(pl.Decimal(10, 4)),
+                pl.col("dv_ttm").cast(pl.Float64, strict=False).cast(pl.Decimal(10, 4)),
+                pl.col("total_mv").cast(pl.Float64, strict=False).cast(pl.Decimal(20, 2)),
+            ])
+            return result
+        except Exception as e:
+            logger.error("获取个股估值失败", code=code, error=str(e))
+            raise
+
     async def enrich_stock_list_with_metadata(
         self, stock_df: pl.DataFrame
     ) -> pl.DataFrame:

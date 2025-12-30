@@ -341,28 +341,45 @@ class MarginTradeRepository:
         )
         return result.scalar()
 
-    async def upsert_many(self, records: list[dict]) -> int:
-        """批量插入或更新两融数据"""
+    async def upsert_many(self, records: list[dict], chunk_size: int = 500) -> int:
+        """批量插入或更新两融数据，增加分批处理以避免参数过多错误"""
         if not records:
             return 0
 
-        stmt = insert(MarginTrade).values(records)
-        stmt = stmt.on_conflict_do_update(
-            index_elements=["code", "trade_date"],
-            set_={
-                "rzye": stmt.excluded.rzye,
-                "rzmre": stmt.excluded.rzmre,
-                "rzche": stmt.excluded.rzche,
-                "rzjme": stmt.excluded.rzjme,
-                "rqye": stmt.excluded.rqye,
-                "rqmcl": stmt.excluded.rqmcl,
-                "rqchl": stmt.excluded.rqchl,
-                "rzrqye": stmt.excluded.rzrqye,
-            },
-        )
+        total_count = 0
+        # 确保所有记录包含所有模型字段
+        fields = ["rzye", "rzmre", "rzche", "rzjme", "rqye", "rqyl", "rqmcl", "rqchl", "rzrqye"]
+        
+        # 分批处理
+        for i in range(0, len(records), chunk_size):
+            chunk = records[i : i + chunk_size]
+            full_records = []
+            for r in chunk:
+                new_record = r.copy()
+                for f in fields:
+                    if f not in new_record:
+                        new_record[f] = None
+                full_records.append(new_record)
 
-        await self.session.execute(stmt)
+            stmt = insert(MarginTrade).values(full_records)
+            stmt = stmt.on_conflict_do_update(
+                index_elements=["code", "trade_date"],
+                set_={
+                    "rzye": stmt.excluded.rzye,
+                    "rzmre": stmt.excluded.rzmre,
+                    "rzche": stmt.excluded.rzche,
+                    "rzjme": stmt.excluded.rzjme,
+                    "rqye": stmt.excluded.rqye,
+                    "rqyl": stmt.excluded.rqyl,
+                    "rqmcl": stmt.excluded.rqmcl,
+                    "rqchl": stmt.excluded.rqchl,
+                    "rzrqye": stmt.excluded.rzrqye,
+                },
+            )
+
+            await self.session.execute(stmt)
+            total_count += len(full_records)
+            
         await self.session.commit()
-
-        logger.debug("批量更新两融数据", count=len(records))
-        return len(records)
+        logger.debug("批量更新两融数据完成", count=total_count)
+        return total_count
