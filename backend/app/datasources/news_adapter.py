@@ -39,9 +39,9 @@ class NewsAdapter:
         async with akshare_limiter:
             return await asyncio.to_thread(func, *args, **kwargs)
 
-    async def get_market_news(self, limit: int = 100, until_time: Optional[datetime] = None) -> List[dict]:
+    async def get_market_news(self, limit: int = 100) -> List[dict]:
         """获取财联社全市电报"""
-        logger.info("获取财联社电报新闻", limit=limit, until_time=until_time)
+        logger.info("获取财联社电报新闻", limit=limit)
         try:
             df = await self._run_sync(ak.stock_info_global_cls)
             if df is None or df.empty:
@@ -56,10 +56,7 @@ class NewsAdapter:
             
             df["publish_time"] = pd.to_datetime(df["publish_date"].astype(str) + " " + df["publish_clock"].astype(str))
             
-            if until_time:
-                until_time_naive = until_time.replace(tzinfo=None)
-                df = df[df["publish_time"] > until_time_naive]
-
+            # 移除 adapter 层的时间过滤，由 syncer 层决定增量逻辑
             df = df.sort_values("publish_time", ascending=False).head(limit)
             
             articles = []
@@ -71,14 +68,14 @@ class NewsAdapter:
                 try:
                     importance_level = int(raw_level)
                 except (ValueError, TypeError):
-                    importance_level = 1 # 默认值，处理 'C' 等非数字
+                    importance_level = 1 # 默认值
                 
                 # 序列化清理 raw_data
                 raw_data = row.to_dict()
                 clean_raw_data = json_safe_dict(raw_data)
 
                 articles.append({
-                    "title": row["title"] if row["title"] else "无标题",
+                    "title": row["title"] if row["title"] and not pd.isna(row["title"]) else "无标题电报",
                     "content": row["content"],
                     "source": "财联社",
                     "publish_time": row["publish_time"],

@@ -96,24 +96,15 @@ class NewsSyncer:
         """同步全市新闻 (财联社)"""
         logger.info("开始同步全市新闻 (财联社)")
         try:
-            async with get_db_session() as session:
-                stmt = select(NewsArticle.publish_time).order_by(desc(NewsArticle.publish_time)).limit(1)
-                result = await session.execute(stmt)
-                last_time = result.scalar_one_or_none()
-
-            # 如果库里啥都没有，回溯 24 小时
-            if last_time is None:
-                last_time = datetime.now(timezone.utc) - timedelta(hours=24)
-                logger.info(f"冷启动模式，开始回溯: {last_time}")
-
-            articles = await news_adapter.get_market_news(limit=200, until_time=last_time)
+            # 每次同步都尝试抓取最新的全量(约20条)数据，由 _upsert_market_articles 处理冲突
+            articles = await news_adapter.get_market_news(limit=100)
             logger.info(f"适配器返回新闻数量: {len(articles)}")
             
             if not articles:
                 return {"status": "no_data", "synced": 0}
 
             synced_count = await self._upsert_market_articles(articles)
-            logger.info(f"实际入库/更新数量: {synced_count}")
+            logger.info(f"实际新入库/更新数量: {synced_count}")
             
             if synced_count > 0:
                 await self.generate_embeddings(NewsArticle)
