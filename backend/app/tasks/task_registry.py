@@ -120,6 +120,13 @@ L1_TASKS = [
         depends_on=["daily-market-sync"],  # 依赖日线数据
         description="技术指标计算（依赖日线数据）",
     ),
+    TaskMetadata(
+        name="daily-news-cleanup",
+        task_path="app.tasks.sync_tasks.cleanup_old_news",
+        tier=TaskTier.L1,
+        schedule_type=ScheduleType.CRONTAB,
+        description="过期新闻数据清理（每日凌晨）",
+    ),
 ]
 
 
@@ -127,20 +134,20 @@ L1_TASKS = [
 
 L2_TASKS = [
     TaskMetadata(
-        name="intraday-market-news-sync",
-        task_path="app.tasks.sync_tasks.sync_market_news",
+        name="intraday-global-news-sync",
+        task_path="app.tasks.sync_tasks.sync_global_news",
         tier=TaskTier.L2,
         schedule_type=ScheduleType.INTERVAL,
-        offset_multiplier=0,  # 立即执行（offset: 0s）
-        description="市场新闻同步",
+        offset_multiplier=0,
+        description="全市快讯同步 (财联社单一源)",
     ),
     TaskMetadata(
-        name="intraday-watchlist-news-sync",
-        task_path="app.tasks.sync_tasks.sync_watchlist_news",
+        name="intraday-stock-news-rotation-sync",
+        task_path="app.tasks.sync_tasks.sync_stock_news_rotation",
         tier=TaskTier.L2,
         schedule_type=ScheduleType.INTERVAL,
-        offset_multiplier=1,  # offset: 1 * 120s = 120s
-        description="自选股新闻同步",
+        offset_multiplier=0.5,
+        description="全市场个股新闻轮询同步 (东方财富)",
     ),
     TaskMetadata(
         name="intraday-watchlist-quotes-sync",
@@ -187,13 +194,6 @@ SPECIAL_TASKS = [
         tier=TaskTier.SPECIAL,
         schedule_type=ScheduleType.CRONTAB,
         description="财务报表同步（每周六 20:00）",
-    ),
-    TaskMetadata(
-        name="weekly-news-cleanup",
-        task_path="app.tasks.sync_tasks.cleanup_old_news",
-        tier=TaskTier.SPECIAL,
-        schedule_type=ScheduleType.CRONTAB,
-        description="新闻清理（每周一 02:00）",
     ),
     TaskMetadata(
         name="daily-health-check",

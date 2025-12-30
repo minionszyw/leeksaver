@@ -193,6 +193,17 @@ class SyncStatusManager:
         info.message = message or f"同步失败: {error}"
         await self.set_task_status(info)
 
+    async def get_cursor(self, key: str) -> int:
+        """获取同步游标"""
+        r = await self._get_redis()
+        val = await r.get(f"leeksaver:sync:cursor:{key}")
+        return int(val) if val else 0
+
+    async def set_cursor(self, key: str, value: int) -> None:
+        """设置同步游标"""
+        r = await self._get_redis()
+        await r.set(f"leeksaver:sync:cursor:{key}", value)
+
     async def close(self) -> None:
         """关闭连接"""
         if self._redis:

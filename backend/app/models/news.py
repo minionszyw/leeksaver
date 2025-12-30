@@ -3,9 +3,9 @@
 """
 
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Any
 
-from sqlalchemy import String, DateTime, Text, Index
+from sqlalchemy import String, DateTime, Text, Index, Integer, JSON, Boolean
 from sqlalchemy.orm import Mapped, mapped_column
 from pgvector.sqlalchemy import Vector
 
@@ -14,88 +14,60 @@ from app.models.base import Base, TimestampMixin
 
 class NewsArticle(Base, TimestampMixin):
     """
-    新闻文章表
-
-    存储财经新闻数据，支持向量检索
+    全市新闻电报表 (财联社)
     """
 
     __tablename__ = "news_articles"
 
-    # 主键 ID
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    
+    # 财联社原生 ID (用于去重)
+    cls_id: Mapped[Optional[int]] = mapped_column(Integer, unique=True, comment="财联社原生ID")
+    
+    title: Mapped[str] = mapped_column(String(500), nullable=False, comment="标题")
+    content: Mapped[str] = mapped_column(Text, nullable=False, comment="正文")
+    source: Mapped[str] = mapped_column(String(50), nullable=False, default="财联社")
+    publish_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    url: Mapped[str] = mapped_column(String(1000), nullable=False, unique=True)
+    
+    # 扩展字段
+    importance_level: Mapped[int] = mapped_column(Integer, default=1, comment="重要性级别(1-5)")
+    related_stocks: Mapped[Optional[str]] = mapped_column(String(500), comment="关联股票代码")
+    keywords: Mapped[Optional[str]] = mapped_column(String(500), comment="分类标签")
+    
+    # 存储所有原始数据以便回溯
+    raw_data: Mapped[Optional[dict]] = mapped_column(JSON, comment="原始JSON数据")
+    
+    embedding: Mapped[Optional[Vector]] = mapped_column(Vector(1024))
 
-    # 标题
-    title: Mapped[str] = mapped_column(
-        String(500),
-        nullable=False,
-        comment="新闻标题",
-    )
-
-    # 正文内容
-    content: Mapped[str] = mapped_column(
-        Text,
-        nullable=False,
-        comment="新闻正文",
-    )
-
-    # 摘要（可选，用于显示）
-    summary: Mapped[Optional[str]] = mapped_column(
-        Text,
-        nullable=True,
-        comment="新闻摘要",
-    )
-
-    # 数据源
-    source: Mapped[str] = mapped_column(
-        String(50),
-        nullable=False,
-        comment="数据源: eastmoney-东方财富, sina-新浪财经, etc.",
-    )
-
-    # 发布时间
-    publish_time: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-        comment="发布时间",
-    )
-
-    # 原文链接
-    url: Mapped[str] = mapped_column(
-        String(1000),
-        nullable=False,
-        comment="原文链接",
-    )
-
-    # 关联股票代码（JSON 字符串格式）
-    # 例如: '["600519", "000001"]'
-    related_stocks: Mapped[Optional[str]] = mapped_column(
-        String(500),
-        nullable=True,
-        comment="关联股票代码列表（JSON 格式）",
-    )
-
-    # 文本向量（1024 维，SiliconFlow BAAI/bge-m3）
-    embedding: Mapped[Optional[Vector]] = mapped_column(
-        Vector(1024),
-        nullable=True,
-        comment="文本向量（1024 维，SiliconFlow BAAI/bge-m3）",
-    )
-
-    # 索引
     __table_args__ = (
         Index("ix_news_articles_publish_time", "publish_time"),
-        Index("ix_news_articles_source", "source"),
-        Index("ix_news_articles_url", "url", unique=True),  # URL 唯一，防止重复
-        # pgvector HNSW 索引（高效向量检索）
-        Index(
-            "ix_news_articles_embedding_hnsw",
-            "embedding",
-            postgresql_using="hnsw",
-            postgresql_with={"m": 16, "ef_construction": 64},
-            postgresql_ops={"embedding": "vector_cosine_ops"},
-        ),
-        {"comment": "新闻文章表"},
+        {"comment": "全市新闻电报表 (财联社单一源)"},
     )
 
-    def __repr__(self) -> str:
-        return f"<NewsArticle {self.id} {self.title[:30]}>"
+
+class StockNewsArticle(Base, TimestampMixin):
+    """
+    个股深度新闻表 (东方财富)
+    """
+
+    __tablename__ = "stock_news_articles"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    stock_code: Mapped[str] = mapped_column(String(20), nullable=False, index=True, comment="关联股票代码")
+    
+    title: Mapped[str] = mapped_column(String(500), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    source: Mapped[str] = mapped_column(String(50), nullable=False)
+    publish_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    url: Mapped[str] = mapped_column(String(1000), nullable=False, unique=True)
+    
+    keywords: Mapped[Optional[str]] = mapped_column(String(500))
+    raw_data: Mapped[Optional[dict]] = mapped_column(JSON)
+    
+    embedding: Mapped[Optional[Vector]] = mapped_column(Vector(1024))
+
+    __table_args__ = (
+        Index("ix_stock_news_articles_stock_publish", "stock_code", "publish_time"),
+        {"comment": "个股深度新闻表 (东方财富源)"},
+    )

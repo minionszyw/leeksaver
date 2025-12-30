@@ -65,10 +65,17 @@ def generate_beat_schedule() -> dict:
 
         # L1 任务：固定时间（从配置读取）
         if task_meta.tier == TaskTier.L1:
-            schedule_config = crontab(
-                hour=settings.l1_schedule_hour,
-                minute=settings.l1_schedule_minute,
-            )
+            if "cleanup" in task_meta.name:
+                # 新闻清理任务使用独立的时间配置
+                schedule_config = crontab(
+                    hour=settings.cleanup_news_hour,
+                    minute=settings.cleanup_news_minute,
+                )
+            else:
+                schedule_config = crontab(
+                    hour=settings.l1_schedule_hour,
+                    minute=settings.l1_schedule_minute,
+                )
 
         # L2 任务：固定间隔 + offset
         elif task_meta.tier == TaskTier.L2:
@@ -88,13 +95,6 @@ def generate_beat_schedule() -> dict:
                     day_of_week=settings.sync_financial_day_of_week,
                     hour=settings.sync_financial_hour,
                     minute=settings.sync_financial_minute,
-                )
-            elif "cleanup" in task_meta.name:
-                # 新闻清理（每周一 02:00）
-                schedule_config = crontab(
-                    day_of_week=settings.cleanup_news_day_of_week,
-                    hour=settings.cleanup_news_hour,
-                    minute=settings.cleanup_news_minute,
                 )
             elif "health" in task_meta.name:
                 # 数据健康巡检（每天 09:00）

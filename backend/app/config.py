@@ -84,10 +84,7 @@ class Settings(BaseSettings):
     ollama_model: str = "qwen2.5:14b"
 
     # 数据清理配置
-    news_retention_days: int = Field(default=90, description="新闻保留天数")
-    news_cleanup_protect_watchlist: bool = Field(
-        default=True, description="是否保护自选股相关的新闻"
-    )
+    news_retention_years: int = Field(default=1, description="新闻保留年数")
 
     # 数据同步限制配置
     news_sync_market_limit: int = Field(
@@ -147,8 +144,7 @@ class Settings(BaseSettings):
     sync_financial_hour: int = Field(default=20, description="财报同步小时")
     sync_financial_minute: int = Field(default=0, description="财报同步分钟")
 
-    # 新闻清理（每周一 02:00）
-    cleanup_news_day_of_week: int = Field(default=0, description="新闻清理星期几（0=周一）")
+    # 新闻清理（每天 02:00）
     cleanup_news_hour: int = Field(default=2, description="新闻清理小时")
     cleanup_news_minute: int = Field(default=0, description="新闻清理分钟")
 

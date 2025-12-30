@@ -163,47 +163,37 @@ def sync_financial_statements(self):
 
 
 @shared_task(bind=True, max_retries=3)
-def sync_market_news(self):
+def sync_global_news(self):
     """
-    同步全市场财经新闻
-
-    每天执行 2 次（早 8:00 和晚 18:00）
+    同步全市快讯 (财联社单一源)
     """
-    from app.config import settings
     from app.sync.news_syncer import news_syncer
 
-    logger.info("开始同步全市场新闻")
+    logger.info("开始同步全市快讯")
     try:
-        result = run_async(news_syncer.sync_market_news(limit=settings.news_sync_market_limit))
-        logger.info("全市场新闻同步完成", **result)
+        result = run_async(news_syncer.sync_market_news())
+        logger.info("全市快讯同步完成", **result)
         return {"status": "success", **result}
     except Exception as e:
-        logger.error("全市场新闻同步失败", error=str(e))
+        logger.error("全市快讯同步失败", error=str(e))
         raise self.retry(exc=e, countdown=300)
 
 
 @shared_task(bind=True, max_retries=3)
-def sync_watchlist_news(self):
+def sync_stock_news_rotation(self):
     """
-    同步自选股新闻
-
-    优先同步用户自选股的相关新闻，如果没有自选股则降级为全市场新闻
-    每天执行 2 次（早 8:05 和晚 18:05）
+    全市场个股新闻轮询同步 (东方财富)
     """
-    from app.config import settings
     from app.sync.news_syncer import news_syncer
 
-    logger.info("开始同步自选股新闻")
+    logger.info("开始轮询个股新闻")
     try:
-        result = run_async(
-            news_syncer.sync_watchlist_news(
-                limit_per_stock=settings.news_sync_watchlist_limit_per_stock
-            )
-        )
-        logger.info("自选股新闻同步完成", **result)
+        # 每批次处理 50 只股票
+        result = run_async(news_syncer.sync_stock_news_batch(batch_size=50))
+        logger.info("个股新闻轮询同步完成", **result)
         return {"status": "success", **result}
     except Exception as e:
-        logger.error("自选股新闻同步失败", error=str(e))
+        logger.error("个股新闻轮询同步失败", error=str(e))
         raise self.retry(exc=e, countdown=300)
 
 
