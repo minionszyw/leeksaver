@@ -1,10 +1,11 @@
 """
 财务数据同步器
 
-负责同步股票财务报表数据
+负责同步股票财务报表数据及经营数据
 """
 
 import asyncio
+from datetime import date
 from typing import Callable
 
 from app.config import settings
@@ -12,7 +13,7 @@ from app.core.database import get_db_session
 from app.core.logging import get_logger
 from app.datasources.akshare_adapter import akshare_adapter
 from app.repositories.stock_repository import StockRepository
-from app.repositories.financial_repository import FinancialRepository
+from app.repositories.financial_repository import FinancialRepository, OperationDataRepository
 
 logger = get_logger(__name__)
 
@@ -26,18 +27,10 @@ class FinancialSyncer:
     async def sync_single(self, code: str, limit: int = 8) -> int:
         """
         同步单只股票的财务数据
-
-        Args:
-            code: 股票代码
-            limit: 获取最近 N 个报告期数据，默认 8 个（最近 2 年）
-
-        Returns:
-            同步的记录数
         """
         async with get_db_session() as session:
             repo = FinancialRepository(session)
 
-            # 获取财务数据
             try:
                 df = await akshare_adapter.get_financial_statements(code, limit)
 
@@ -45,7 +38,6 @@ class FinancialSyncer:
                     logger.debug("无财务数据", code=code)
                     return 0
 
-                # 写入数据库
                 records = df.to_dicts()
                 count = await repo.upsert_many(records)
 
@@ -56,20 +48,52 @@ class FinancialSyncer:
                 logger.warning("同步财务数据失败", code=code, error=str(e))
                 return 0
 
+    async def sync_operation_data(self, code: str) -> int:
+        """
+        同步单只股票的经营数据（目前使用基础资料接口）
+        """
+        async with get_db_session() as session:
+            repo = OperationDataRepository(session)
+
+            try:
+                df = await akshare_adapter.get_operation_data(code)
+
+                if len(df) == 0:
+                    logger.debug("无经营数据", code=code)
+                    return 0
+
+                # 将基础资料数据转换为 OperationData KV 结构
+                today_str = date.today().strftime("%Y-%m-%d")
+                records = []
+                for row in df.iter_rows(named=True):
+                    records.append({
+                        "code": code,
+                        "period": today_str, # 基础资料使用当天日期作为报告期
+                        "metric_name": row["metric_name"],
+                        "metric_category": "basic_info",
+                        "metric_value_text": row["metric_value_text"],
+                        "source": "AkShare-个股资料"
+                    })
+
+                if not records:
+                    return 0
+
+                count = await repo.upsert_many(records)
+                logger.debug("同步经营数据完成", code=code, count=count)
+                return count
+
+            except Exception as e:
+                logger.warning("同步经营数据失败", code=code, error=str(e))
+                return 0
+
     async def sync_batch(
         self,
         codes: list[str],
+        sync_type: str = "financial", # "financial" or "operation"
         progress_callback: Callable[[int, int], None] | None = None,
     ) -> dict:
         """
-        批量同步财务数据
-
-        Args:
-            codes: 股票代码列表
-            progress_callback: 进度回调函数 (current, total)
-
-        Returns:
-            同步结果统计
+        批量同步数据
         """
         total = len(codes)
         stats = {
@@ -79,27 +103,29 @@ class FinancialSyncer:
             "records": 0,
         }
 
-        logger.info("开始批量同步财务数据", total=total)
+        logger.info(f"开始批量同步{sync_type}数据", total=total)
 
         for i, code in enumerate(codes):
             try:
-                count = await self.sync_single(code)
+                if sync_type == "financial":
+                    count = await self.sync_single(code)
+                else:
+                    count = await self.sync_operation_data(code)
+                
                 stats["records"] += count
                 stats["success"] += 1
             except Exception as e:
                 stats["failed"] += 1
-                logger.warning("同步失败", code=code, error=str(e))
+                logger.warning(f"同步{sync_type}失败", code=code, error=str(e))
 
-            # 进度回调
             if progress_callback:
                 progress_callback(i + 1, total)
 
-            # 每批次后休息 2 秒（财务数据为低频数据，降低请求频率）
             if (i + 1) % self.batch_size == 0:
-                await asyncio.sleep(2)
+                await asyncio.sleep(1)
 
         logger.info(
-            "批量同步财务数据完成",
+            f"批量同步{sync_type}数据完成",
             success=stats["success"],
             failed=stats["failed"],
             records=stats["records"],
@@ -107,23 +133,15 @@ class FinancialSyncer:
 
         return stats
 
-    async def sync_all(
-        self,
-        progress_callback: Callable[[int, int], None] | None = None,
-    ) -> dict:
+    async def sync_all(self, sync_type: str = "financial") -> dict:
         """
-        同步全市场财务数据（不包括 ETF）
-
-        Args:
-            progress_callback: 进度回调
+        同步全市场数据
         """
         async with get_db_session() as session:
             repo = StockRepository(session)
-            # 只同步股票，不同步 ETF（ETF 无财务数据）
             codes = await repo.get_all_codes(asset_type="stock")
 
-        logger.info("开始全市场财务数据同步", total=len(codes))
-        return await self.sync_batch(codes, progress_callback)
+        return await self.sync_batch(codes, sync_type=sync_type)
 
 
 # 全局单例

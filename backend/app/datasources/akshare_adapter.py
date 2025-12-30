@@ -533,50 +533,34 @@ class AkShareAdapter(DataSourceBase):
 
     async def get_operation_data(self, code: str) -> pl.DataFrame:
         """
-        获取股票主营构成数据
+        获取股票基础经营信息
 
-        使用 stock_zygc_em 接口
+        使用 stock_individual_info_em 接口获取 KV 形式的个股资料
         """
-        logger.debug("获取主营构成数据", code=code)
+        logger.debug("获取股票基础经营信息", code=code)
 
         try:
-            df = await self._run_sync(ak.stock_zygc_em, symbol=code)
+            df = await self._run_sync(ak.stock_individual_info_em, symbol=code)
 
             if df is None or df.empty:
-                logger.warning("主营构成数据为空", code=code)
+                logger.warning("股票基础经营信息为空", code=code)
                 return pl.DataFrame()
 
+            # 显式转换为字符串，避免 PyArrow 类型推断失败
+            df = df.astype(str)
             result = pl.from_pandas(df)
             
             # 规范化列名
-            # 接口返回: 报告期, 分类, 主营收入, 收入比例, 主营利润, 利润比例, 毛利率
+            # 接口返回: item, value
             result = result.select([
                 pl.lit(code).alias("code"),
-                pl.col("报告期").str.to_date("%Y-%m-%d").alias("end_date"),
-                pl.col("分类").alias("item_name"),
-                pl.col("主营收入").cast(pl.Float64, strict=False).cast(pl.Decimal(20, 2)).alias("revenue"),
-                pl.col("收入比例").str.replace("%", "").cast(pl.Float64, strict=False).cast(pl.Decimal(10, 4)).alias("revenue_ratio"),
-                pl.col("主营利润").cast(pl.Float64, strict=False).cast(pl.Decimal(20, 2)).alias("profit"),
-                pl.col("利润比例").str.replace("%", "").cast(pl.Float64, strict=False).cast(pl.Decimal(10, 4)).alias("profit_ratio"),
-                pl.col("毛利率").str.replace("%", "").cast(pl.Float64, strict=False).cast(pl.Decimal(10, 4)).alias("gross_margin"),
+                pl.col("item").alias("metric_name"),
+                pl.col("value").cast(pl.Utf8).alias("metric_value_text"),
             ])
             
-            # 添加业务类型（从项目名称推断）
-            result = result.with_columns(
-                pl.when(pl.col("item_name").str.contains("行业"))
-                .then(pl.lit("industry"))
-                .when(pl.col("item_name").str.contains("产品"))
-                .then(pl.lit("product"))
-                .when(pl.col("item_name").str.contains("地区"))
-                .then(pl.lit("region"))
-                .otherwise(pl.lit("other"))
-                .alias("item_type")
-            )
-
-            logger.debug("获取主营构成成功", code=code, count=len(result))
             return result
         except Exception as e:
-            logger.error("获取主营构成失败", code=code, error=str(e))
+            logger.error("获取股票基础经营信息失败", code=code, error=str(e))
             raise
 
     async def get_stock_valuation(self, code: str) -> pl.DataFrame:

@@ -153,12 +153,41 @@ def sync_financial_statements(self):
 
     logger.info("开始同步财务报表")
     try:
-        result = run_async(financial_syncer.sync_all())
+        result = run_async(financial_syncer.sync_all(sync_type="financial"))
         logger.info("财务报表同步完成", **result)
         return {"status": "success", **result}
     except Exception as e:
         logger.error("财务报表同步失败", error=str(e))
         # 失败后 5 分钟重试
+        raise self.retry(exc=e, countdown=300)
+
+
+@shared_task(bind=True, max_retries=3)
+def sync_operation_data(self):
+    """
+    同步全市场经营数据 (主营构成)
+    """
+    from app.sync.financial_syncer import financial_syncer
+
+    logger.info("开始同步经营数据")
+    try:
+        # 为了验证，我们先只同步前 50 只股票，避免执行时间过长
+        from app.core.database import get_db_session
+        from app.repositories.stock_repository import StockRepository
+        
+        async def get_test_codes():
+            async with get_db_session() as session:
+                repo = StockRepository(session)
+                codes = await repo.get_all_codes(asset_type="stock")
+                return codes[:50]
+        
+        test_codes = run_async(get_test_codes())
+        result = run_async(financial_syncer.sync_batch(test_codes, sync_type="operation"))
+        
+        logger.info("经营数据同步完成", **result)
+        return {"status": "success", **result}
+    except Exception as e:
+        logger.error("经营数据同步失败", error=str(e))
         raise self.retry(exc=e, countdown=300)
 
 

@@ -8,7 +8,7 @@ from typing import Optional, Sequence
 from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.financial import FinancialStatement
+from app.models.financial import FinancialStatement, OperationData
 from app.repositories.base import BaseRepository
 
 
@@ -51,23 +51,32 @@ class FinancialRepository(BaseRepository[FinancialStatement]):
     async def upsert_many(self, statements: list[dict]) -> int:
         """
         批量更新或插入（使用高性能 insert on_conflict）
-
-        性能提升：使用 BaseRepository.upsert_many() 替代逐行 merge
-        预期性能提升：10-50 倍（取决于数据量）
-
-        Args:
-            statements: 财务报表数据列表
-
-        Returns:
-            插入/更新的记录数
         """
         if not statements:
             return 0
 
-        # 调用父类的高性能 upsert_many
-        # 财务报表的主键是 (code, end_date)
         return await super().upsert_many(
             records=statements,
             conflict_columns=["code", "end_date"],
-            # update_columns=None 会自动更新所有非主键列
+        )
+
+
+class OperationDataRepository(BaseRepository[OperationData]):
+    """经营数据仓库"""
+
+    def __init__(self, session: AsyncSession):
+        super().__init__(session, OperationData)
+
+    async def upsert_many(self, records: list[dict]) -> int:
+        """
+        批量更新或插入经营数据
+        
+        主键/约束: (code, period, metric_name)
+        """
+        if not records:
+            return 0
+
+        return await super().upsert_many(
+            records=records,
+            conflict_columns=["code", "period", "metric_name"],
         )
