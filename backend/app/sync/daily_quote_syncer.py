@@ -80,8 +80,8 @@ class DailyQuoteSyncer:
                 return count
 
             except Exception as e:
-                logger.warning("同步日线行情失败", code=code, error=str(e))
-                return 0
+                logger.error("同步日线行情失败", code=code, error=str(e))
+                raise e
 
     async def sync_batch(
         self,

@@ -55,6 +55,8 @@ class NewsAdapter:
             })
             
             df["publish_time"] = pd.to_datetime(df["publish_date"].astype(str) + " " + df["publish_clock"].astype(str))
+            # 显式本地化为北京时间 (+8)，然后转换为 UTC
+            df["publish_time"] = df["publish_time"].dt.tz_localize("Asia/Shanghai").dt.tz_convert("UTC")
             
             # 移除 adapter 层的时间过滤，由 syncer 层决定增量逻辑
             df = df.sort_values("publish_time", ascending=False).head(limit)
@@ -109,7 +111,9 @@ class NewsAdapter:
             })
 
             result = result.with_columns([
-                pl.col("publish_time").str.to_datetime("%Y-%m-%d %H:%M:%S", strict=False),
+                pl.col("publish_time").str.to_datetime("%Y-%m-%d %H:%M:%S", strict=False)
+                .dt.replace_time_zone("Asia/Shanghai")
+                .dt.convert_time_zone("UTC"),
                 pl.lit(code).alias("stock_code")
             ])
             
@@ -131,6 +135,6 @@ class NewsAdapter:
         if not all_news:
             return pl.DataFrame()
         
-        return pl.concat(all_news).unique(subset=["url"])
+        return pl.concat(all_news).unique(subset=["stock_code", "url"])
 
 news_adapter = NewsAdapter()

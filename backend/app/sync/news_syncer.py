@@ -10,7 +10,7 @@ from app.core.database import get_db_session
 from app.core.logging import get_logger
 from app.datasources.news_adapter import news_adapter
 from app.models.news import NewsArticle, StockNewsArticle
-from app.repositories.stock_repository import StockRepository
+from app.repositories.stock_repository import StockRepository, WatchlistRepository
 from app.services.embedding_service import embedding_service
 from app.sync.status_manager import sync_status_manager
 
@@ -85,7 +85,14 @@ class NewsSyncer:
                     created_at=datetime.now(timezone.utc),
                     updated_at=datetime.now(timezone.utc),
                 )
-                stmt = stmt.on_conflict_do_nothing(index_elements=["url"])
+                # 使用复合唯一索引 (stock_code, url) 进行冲突处理
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=["stock_code", "url"],
+                    set_={
+                        "content": stmt.excluded.content,
+                        "updated_at": datetime.now(timezone.utc)
+                    }
+                )
                 res = await session.execute(stmt)
                 if res.rowcount > 0:
                     synced_count += 1
@@ -115,26 +122,33 @@ class NewsSyncer:
             raise
 
     async def sync_stock_news_batch(self, batch_size: int = 50) -> dict:
-        """轮询同步全市场个股新闻"""
+        """轮询同步全市场个股新闻 (自选股优先)"""
         logger.info("开始轮询同步个股新闻", batch_size=batch_size)
         try:
             cursor = await sync_status_manager.get_cursor("stock_news_rotation")
             
             async with get_db_session() as session:
                 stock_repo = StockRepository(session)
+                watchlist_repo = WatchlistRepository(session)
+                
                 stocks = await stock_repo.get_all_codes()
+                watchlist = await watchlist_repo.get_codes()
             
             if not stocks:
                 return {"status": "no_stocks", "synced": 0}
 
+            # 1. 计算轮询切片
             start_idx = cursor % len(stocks)
             end_idx = start_idx + batch_size
-            batch_codes = stocks[start_idx:end_idx]
+            rotation_codes = stocks[start_idx:end_idx]
             
             if end_idx > len(stocks):
-                batch_codes += stocks[:(end_idx % len(stocks))]
+                rotation_codes += stocks[:(end_idx % len(stocks))]
 
-            logger.info(f"本批次同步个股数量: {len(batch_codes)}")
+            # 2. 合并自选股并去重
+            batch_codes = list(set(watchlist + rotation_codes))
+            
+            logger.info(f"本批次同步个股数量: {len(batch_codes)} (其中自选股: {len(watchlist)})")
 
             news_df = await news_adapter.get_batch_stock_news(batch_codes, limit_per_stock=10)
             
