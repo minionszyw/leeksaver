@@ -87,14 +87,28 @@ def generate_beat_schedule() -> dict:
                 offset=timedelta(seconds=offset_seconds),
             )
 
-        # 特殊任务：使用独立配置
-        elif task_meta.tier == TaskTier.SPECIAL:
+        # L0 任务：使用独立配置
+        elif task_meta.tier == TaskTier.L0:
             if "financial" in task_meta.name:
                 # 财报同步（每周六 20:00）
                 schedule_config = crontab(
                     day_of_week=settings.sync_financial_day_of_week,
                     hour=settings.sync_financial_hour,
                     minute=settings.sync_financial_minute,
+                )
+            elif "macro" in task_meta.name:
+                # 宏观数据同步（默认每周六 21:00）
+                schedule_config = crontab(
+                    day_of_week=settings.sync_financial_day_of_week,  # 复用财报的星期配置
+                    hour=21, # 暂按注册表写死，或未来扩充环境变量
+                    minute=0,
+                )
+            elif "operation" in task_meta.name:
+                # 经营数据同步（默认每周六 22:00）
+                schedule_config = crontab(
+                    day_of_week=settings.sync_financial_day_of_week,
+                    hour=22,
+                    minute=0,
                 )
             elif "health" in task_meta.name:
                 # 数据健康巡检（每天 09:00）

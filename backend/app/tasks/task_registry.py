@@ -13,10 +13,10 @@ from typing import Optional
 class TaskTier(str, Enum):
     """任务层级"""
 
+    L0 = "L0"  # 周更组 - 财务/宏观/经营数据
     L1 = "L1"  # 低频/日更组 - 收盘后统一执行
     L2 = "L2"  # 高频/日内组 - 定时轮询
     L3 = "L3"  # 按需/实时组 - API 触发
-    SPECIAL = "SPECIAL"  # 特殊任务 - 独立配置
 
 
 class ScheduleType(str, Enum):
@@ -146,7 +146,7 @@ L2_TASKS = [
         task_path="app.tasks.sync_tasks.sync_stock_news_rotation",
         tier=TaskTier.L2,
         schedule_type=ScheduleType.INTERVAL,
-        offset_multiplier=0.5,
+        offset_multiplier=1,
         description="全市场个股新闻轮询同步 (东方财富)",
     ),
     TaskMetadata(
@@ -185,20 +185,34 @@ L2_TASKS = [
 ]
 
 
-# ==================== 特殊任务：独立配置 ====================
+# ==================== L0 任务：周更组（独立配置） ====================
 
-SPECIAL_TASKS = [
+L0_TASKS = [
     TaskMetadata(
         name="weekly-financial-sync",
         task_path="app.tasks.sync_tasks.sync_financial_statements",
-        tier=TaskTier.SPECIAL,
+        tier=TaskTier.L0,
         schedule_type=ScheduleType.CRONTAB,
         description="财务报表同步（每周六 20:00）",
     ),
     TaskMetadata(
+        name="weekly-macro-sync",
+        task_path="app.tasks.sync_tasks.sync_macro_economic_data",
+        tier=TaskTier.L0,
+        schedule_type=ScheduleType.CRONTAB,
+        description="宏观经济数据同步（每周六 21:00）",
+    ),
+    TaskMetadata(
+        name="weekly-operation-sync",
+        task_path="app.tasks.sync_tasks.sync_operation_data",
+        tier=TaskTier.L0,
+        schedule_type=ScheduleType.CRONTAB,
+        description="经营数据同步（每周六 22:00）",
+    ),
+    TaskMetadata(
         name="daily-health-check",
-        task_path="app.tasks.monitoring_tasks.daily_health_check",
-        tier=TaskTier.SPECIAL,
+        task_path="daily_data_health_check",
+        tier=TaskTier.L0,
         schedule_type=ScheduleType.CRONTAB,
         description="数据健康巡检（每天 09:00）",
     ),
@@ -206,4 +220,4 @@ SPECIAL_TASKS = [
 
 
 # 注册表汇总
-ALL_TASKS = L1_TASKS + L2_TASKS + SPECIAL_TASKS
+ALL_TASKS = L1_TASKS + L2_TASKS + L0_TASKS

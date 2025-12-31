@@ -22,9 +22,10 @@ LeekSaver 采用 **“时序行情 + 向量资讯 + 关联基础”** 的三位�
 ### 4. 同步分层策略 (Sync Layers)
 | 层次 | 定义 | 同步范围 | 触发频率 | 典型数据 |
 | :--- | :--- | :--- | :--- | :--- |
-| **L1** | 核心快照 | 全市场 (5000+) | 每日收盘/实时 | 日线、估值、资金流、涨停池 |
-| **L2** | 深度追踪 | 仅自选股 (Watchlist) | 高频/每小时 | 分时线、实时快讯、个股深度新闻 |
-| **L3** | 基础档案 | 全市场 (增量/全量) | 周级/月级 | 财务报表、经营数据、宏观指标 |
+| **L0** | 周更组 | 全市场 | 每周六 | 财务报表、宏观指标、经营数据 |
+| **L1** | 日更组 | 全市场 | 每日 17:30 (收盘后) | 股票列表、日线行情、每日估值、融资融券、板块基础、资金流向、涨停股、龙虎榜、北向资金、市场情绪、技术指标 |
+| **L2** | 日内组 | 全市场 | 固定间隔 (默认 120s) | 股票新闻、分时行情（自选股）、板块行情、全市快讯 |
+| **L3** | 按需组 | 个股/指标 | 实时触发 (API/缓存) |  |
 
 ### 5. 数据流水线架构 (Data Pipeline)
 
@@ -46,10 +47,10 @@ graph TD
         SC[分层调度策略]
         L1[L1: 全市场日线/估值/资金]
         L2[L2: 自选股分钟线/快讯]
-        L3[L3: 财务/宏观/经营数据]
+        L0[L0: 财务/宏观/经营数据]
         
         CL --> SC
-        SC --> L1 & L2 & L3
+        SC --> L1 & L2 & L0
     end
 
     subgraph "存储与监控"
@@ -58,8 +59,8 @@ graph TD
         RT[断点续传 / 超时重试机制]
         DD[Data Doctor 每日健康巡查]
         
-        L1 & L2 & L3 --> DB
-        L1 & L2 & L3 -. 失败 .-> MS
+        L1 & L2 & L0 --> DB
+        L1 & L2 & L0 -. 失败 .-> MS
         MS --> RT --> SC
         DB --> DD
     end
@@ -71,52 +72,71 @@ graph TD
 
 ---
 
-## 数据库状态表
+## 数据库架构表
 
 | 表名 | 中文名 | 类型 | 来源 | 接口 | 同步器 | 分层 | 数据量 | 备注 |
 | :--- | :--- | :-: | :-: | :--- | :--- | :-: | --: | :--- |
-| `daily_quotes` | 日线行情 | 超表 | AKShare | `stock_zh_a_hist` | `sync_daily_quotes` | L1 | 3,092,054 | 核心行情 (TimescaleDB) |
-| `financial_statements` | 财务报表 | 普通 | AKShare | `stock_financial_abstract_ths` | `sync_financial_statements` | L3 | 42,893 | 每季度更新 |
-| `stocks` | 股票列表 | 普通 | AKShare | `stock_info_a_code_name` | `sync_stock_list` | L1 | 6,795 | 基础档案 |
+| `daily_quotes` | 日线行情 | 超表 | AKShare | `stock_zh_a_hist` | `sync_daily_quotes` | L1 | 3,095,446 | 核心行情 (TimescaleDB) |
+| `financial_statements` | 财务报表 | 普通 | AKShare | `stock_financial_abstract_ths` | `sync_financial_statements` | L0 | 42,893 | 每季度更新 |
+| `stocks` | 股票列表 | 普通 | AKShare | `stock_info_a_code_name` | `sync_stock_list` | L1 | 6,798 | 基础档案 |
 | `daily_valuations` | 每日估值 | 普通 | AKShare | `stock_zh_a_spot_em` | `sync_daily_valuation` | L1 | 5,471 | PE/PB/市值等 |
-| `macro_indicators` | 宏观指标 | 普通 | AKShare | `macro_china_gdp` 等 | `sync_macro_economic_data` | L3 | 4,739 | GDP/CPI/PMI 等 |
-| `margin_trades` | 融资融券 | 普通 | AKShare | `stock_margin_detail_szse` | `sync_margin_trade` | L1 | 3,992 | T+1 披露 |
-| `stock_news_articles` | 股票新闻 | 普通 | AKShare | `stock_news_em` | `sync_stock_news_rotation` | L2 | 2,021 | 个股深度新闻 (东财) |
+| `macro_indicators` | 宏观指标 | 普通 | AKShare | `macro_china_gdp` 等 | `sync_macro_economic_data` | L0 | 4,739 | GDP/CPI/PMI 等 |
+| `margin_trades` | 融资融券 | 普通 | AKShare | `stock_margin_detail_szse/sse` | `sync_margin_trade` | L1 | 3,992 | T+1 披露 |
+| `stock_news_articles` | 股票新闻 | 普通 | AKShare | `stock_news_em` | `sync_stock_news_rotation` | L2 | 2,021 | 需 `generate_news_embeddings` |
 | `minute_quotes` | 分时行情 | 超表 | AKShare | `stock_zh_a_minute` | `sync_minute_quotes` | L2 | 1,666 | 分钟行情 (TimescaleDB) |
-| `sectors` | 板块基础 | 普通 | AKShare | `stock_board_industry_name_em` | `sync_sector_quotes` | L1 | 527 | 行业/概念分类 |
-| `sector_quotes` | 板块行情 | 普通 | AKShare | `stock_board_industry_name_em` | `sync_sector_quotes` | L1 | 527 | 板块指数行情 |
-| `stock_fund_flows` | 资金流向 | 普通 | AKShare | `stock_individual_fund_flow_rank` | `sync_stock_fund_flow` | L1 | 299 | 个股主力资金 |
-| `news_articles` | 全市快讯 | 普通 | AKShare | `stock_info_global_cls` | `sync_global_news` | L2 | 179 | 财联社电报 |
-| `limit_up_stocks` | 涨停股 | 普通 | AKShare | `stock_zt_pool_em` | `sync_market_sentiment` | L1 | 155 | 每日涨停池 |
-| `dragon_tiger` | 龙虎榜 | 普通 | AKShare | `stock_lhb_detail_em` | `sync_dragon_tiger` | L1 | 82 | 异常波动上榜 |
-| `operation_data` | 经营数据 | 普通 | AKShare | `stock_individual_info_em` | `sync_operation_data` | L3 | 45 | 主营构成/KV数据 |
-| `northbound_flows` | 北向资金 | 普通 | AKShare | `stock_hsgt_fund_flow_summary_em` | `sync_northbound_flow` | L1 | 2 | 沪深港通流量 |
-| `watchlist` | 自选股 | 普通 | 用户 | - | - | 特殊 | 1 | 用户关注列表 |
-| `market_sentiments` | 市场情绪 | 普通 | 计算获取 | `daily_quotes` | `sync_market_sentiment` | L1 | 1 | 涨跌分布/连板高度 |
-| `alembic_version` | 数据库版本 | 普通 | 系统 | - | - | 特殊 | 1 | 迁移记录 |
+| `sectors` | 板块基础 | 普通 | AKShare | `stock_board_industry_name_em` | `sync_sector_quotes` | L2 | 527 | 行业/概念分类 |
+| `sector_quotes` | 板块行情 | 普通 | AKShare | `stock_board_industry_name_em` | `sync_sector_quotes` | L2 | 527 | 板块指数行情 |
+| `stock_fund_flows` | 资金流向 | 普通 | AKShare | `stock_individual_fund_flow_rank` | `sync_stock_fund_flow` | L1 | 399 | 个股主力资金 |
+| `news_articles` | 全市快讯 | 普通 | AKShare | `stock_info_global_cls` | `sync_global_news` | L2 | 40 | 需 `generate_news_embeddings` |
+| `limit_up_stocks` | 涨停股 | 普通 | AKShare | `stock_zt_pool_em` | `sync_market_sentiment` | L1 | 240 | 每日涨停池 |
+| `dragon_tiger` | 龙虎榜 | 普通 | AKShare | `stock_lhb_detail_em` | `sync_dragon_tiger` | L1 | 182 | 异常波动上榜 |
+| `operation_data` | 经营数据 | 普通 | AKShare | `stock_individual_info_em` | `sync_operation_data` | L0 | 45 | 主营构成/KV数据 |
+| `northbound_flows` | 北向资金 | 普通 | AKShare | `stock_hsgt_fund_flow_summary_em` | `sync_northbound_flow` | L1 | 3 | 沪深港通流量 |
+| `watchlist` | 自选股 | 普通 | 用户 | - | - |  | 1 | 用户关注列表 |
+| `market_sentiments` | 市场情绪 | 普通 | 混合 (计算+AKShare) | `daily_quotes` / `stock_zt_pool_em` | `sync_market_sentiment` | L1 | 2 | 涨跌分布/连板高度 |
+| `alembic_version` | 数据库版本 | 普通 | 系统 | - | - |  | 1 | 迁移记录 |
 | `tech_indicators` | 技术指标 | 普通 | 计算获取 | `daily_quotes` | `calculate_tech_indicators` | L1 | 0 | 预计算 MA/MACD/RSI |
-| `sync_errors` | 同步错误 | 普通 | 系统 | - | - | 特殊 | 0 | 错误追踪 |
+| `sync_errors` | 同步错误 | 普通 | 系统 | - | - |  | 0 | 错误追踪 |
 
 ## 常用查询命令
 
-### Celery 任务操作
-- **手动触发同步 (以经营数据为例)**:
+> **💡 开发提示**: 本项目完全运行于 Docker 环境。以下命令已内置数据库凭据和路径，开发者无需手动查找 `.env` 配置即可直接在宿主机终端执行。
+
+### 1. 快速进入交互式环境 (推荐)
+- **直接进入数据库交互命令行 (psql)**:
   ```bash
-  docker exec leeksaver-celery-worker celery -A app.tasks.celery_app call app.tasks.sync_tasks.sync_operation_data
+  # 进入后可直接使用 SQL，无需输入密码
+  docker exec -it leeksaver-db psql -U leeksaver -d leeksaver
   ```
-- **查看 Celery Worker 日志**:
+- **进入 Celery Worker 容器内部 (Bash)**:
   ```bash
-  docker logs --tail 100 leeksaver-celery-worker
+  # 用于查看容器内文件、手动运行 python 脚本等
+  docker exec -it leeksaver-celery-worker bash
   ```
 
-### 数据库查询
-- **查询总量**:
-  ```sql
-  docker exec leeksaver-db psql -U leeksaver -d leeksaver -c "SELECT count(*) FROM xxx ;"
+### 2. Celery 任务操作 (宿主机执行)
+- **手动触发同步 (立即执行特定同步函数)**:
+  ```bash
+  # 格式: ... call app.tasks.sync_tasks.<task_function_name>
+  docker exec leeksaver-celery-worker celery -A app.tasks.celery_app call app.tasks.sync_tasks.sync_operation_data
   ```
-- **查看最近同步记录**:
+- **实时监控任务流水 (Worker 日志)**:
+  ```bash
+  docker logs -f --tail 100 leeksaver-celery-worker
+  ```
+
+### 3. 数据库快捷查询 (宿主机执行)
+- **查看库中所有表名 (引导起点)**:
   ```sql
-  docker exec leeksaver-db psql -U leeksaver -d leeksaver -c "SELECT * FROM xxx ORDER BY created_at DESC LIMIT 10;"
+  docker exec -it leeksaver-db psql -U leeksaver -d leeksaver -c "\dt"
+  ```
+- **查看特定表结构 (了解字段名)**:
+  ```sql
+  docker exec -it leeksaver-db psql -U leeksaver -d leeksaver -c "\d <table_name>"
+  ```
+- **查询表数据总量**:
+  ```sql
+  docker exec -it leeksaver-db psql -U leeksaver -d leeksaver -c "SELECT count(*) FROM <table_name>;"
   ```
 
 ## 数据库表字段
@@ -130,11 +150,15 @@ graph TD
   - `industry` (String): 所属行业
   - `list_date` (Date): 上市日期
   - `is_active` (Boolean): 是否正常交易
+  - `created_at` (DateTime): 创建时间
+  - `updated_at` (DateTime): 更新时间
 - **`watchlist` (自选股表)**
   - `id` (Integer): 自增主键
   - `code` (String): 股票代码
   - `sort_order` (Integer): 排序顺序
   - `note` (String): 备注
+  - `created_at` (DateTime): 创建时间
+  - `updated_at` (DateTime): 更新时间
 - **`sectors` (板块基础信息表)**
   - `code` (String): 板块代码 (主键)
   - `name` (String): 板块名称
@@ -142,6 +166,8 @@ graph TD
   - `level` (Integer): 板块级别 (1/2/3)
   - `parent_code` (String): 父板块代码
   - `is_active` (Boolean): 是否活跃
+  - `created_at` (DateTime): 创建时间
+  - `updated_at` (DateTime): 更新时间
 
 ### 2. 行情数据
 - **`daily_quotes` (日线行情表)**
@@ -177,6 +203,8 @@ graph TD
   - `falling_count` (Integer): 下跌家数
   - `leading_stock` (String): 领涨股代码
   - `leading_stock_pct` (Numeric): 领涨股涨跌幅 (%)
+  - `created_at` (DateTime): 创建时间
+  - `updated_at` (DateTime): 更新时间
 
 ### 3. 财务与经营数据
 - **`financial_statements` (财务报表表)**
@@ -196,6 +224,8 @@ graph TD
   - `debt_asset_ratio` (Numeric): 资产负债率 (%)
   - `eps` (Numeric): 基本每股收益
   - `bps` (Numeric): 每股净资产
+  - `created_at` (DateTime): 创建时间
+  - `updated_at` (DateTime): 更新时间
 - **`operation_data` (经营数据表)**
   - `id` (Integer): 自增主键
   - `code` (String): 股票代码
@@ -207,6 +237,8 @@ graph TD
   - `unit` (String): 单位
   - `source` (String): 数据来源
   - `remark` (String): 备注
+  - `created_at` (DateTime): 创建时间
+  - `updated_at` (DateTime): 更新时间
 
 ### 4. 估值与技术指标
 - **`daily_valuations` (每日估值表)**
@@ -251,6 +283,8 @@ graph TD
   - `sz_buy_amount` (Numeric): 深股通买入金额 (亿元)
   - `sz_sell_amount` (Numeric): 深股通卖出金额 (亿元)
   - `total_net_inflow` (Numeric): 北向资金净流入合计 (亿元)
+  - `created_at` (DateTime): 创建时间
+  - `updated_at` (DateTime): 更新时间
 - **`stock_fund_flows` (个股资金流向表)**
   - `code` (String): 股票代码 (复合主键)
   - `trade_date` (Date): 交易日期 (复合主键)
@@ -286,6 +320,8 @@ graph TD
   - `close` (Numeric): 收盘价
   - `change_pct` (Numeric): 涨跌幅 (%)
   - `turnover_rate` (Numeric): 换手率 (%)
+  - `created_at` (DateTime): 创建时间
+  - `updated_at` (DateTime): 更新时间
 
 ### 6. 市场情绪
 - **`market_sentiments` (市场情绪指标表)**
@@ -305,6 +341,8 @@ graph TD
   - `avg_turnover_rate` (Numeric): 全市场平均换手率 (%)
   - `total_volume` (BigInteger): 市场总成交量 (手)
   - `total_amount` (Numeric): 市场总成交额 (亿元)
+  - `created_at` (DateTime): 创建时间
+  - `updated_at` (DateTime): 更新时间
 - **`limit_up_stocks` (涨停股票详情表)**
   - `id` (Integer): 自增主键
   - `code` (String): 股票代码
@@ -318,6 +356,8 @@ graph TD
   - `turnover_rate` (Numeric): 换手率 (%)
   - `amount` (Numeric): 成交额 (万元)
   - `seal_amount` (Numeric): 封单金额 (万元)
+  - `created_at` (DateTime): 创建时间
+  - `updated_at` (DateTime): 更新时间
 
 ### 7. 资讯与宏观
 - **`news_articles` (全市快讯表)**
@@ -331,8 +371,10 @@ graph TD
   - `importance_level` (Integer): 重要性级别 (1-5)
   - `related_stocks` (String): 关联股票代码
   - `keywords` (String): 分类标签
-  - `raw_data` (JSON): 原始 JSON 数据
+  - `raw_data` (JSONB): 原始 JSON 数据
   - `embedding` (Vector): 文本向量 (1024维)
+  - `created_at` (DateTime): 创建时间
+  - `updated_at` (DateTime): 更新时间
 - **`stock_news_articles` (个股深度新闻表)**
   - `id` (Integer): 自增主键
   - `stock_code` (String): 关联股票代码
@@ -342,8 +384,10 @@ graph TD
   - `publish_time` (DateTime): 发布时间
   - `url` (String): 链接
   - `keywords` (String): 关键词
-  - `raw_data` (JSON): 原始数据
+  - `raw_data` (JSONB): 原始数据
   - `embedding` (Vector): 文本向量 (1024维)
+  - `created_at` (DateTime): 创建时间
+  - `updated_at` (DateTime): 更新时间
 - **`macro_indicators` (宏观指标表)**
   - `id` (Integer): 主键 ID
   - `indicator_name` (String): 指标名称 (GDP/CPI/PMI等)
@@ -354,6 +398,8 @@ graph TD
   - `yoy_rate` (Numeric): 同比增长率 (%)
   - `mom_rate` (Numeric): 环比增长率 (%)
   - `unit` (String): 数据单位
+  - `created_at` (DateTime): 创建时间
+  - `updated_at` (DateTime): 更新时间
 
 ### 8. 系统监控
 - **`sync_errors` (同步错误记录表)**
