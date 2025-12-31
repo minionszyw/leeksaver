@@ -43,35 +43,15 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     container_name: leeksaver-backend
+    env_file:
+      - .env
     environment:
       - POSTGRES_HOST=db
       - POSTGRES_PORT=5432
-      - POSTGRES_USER=${POSTGRES_USER:-leeksaver}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-leeksaver_password}
-      - POSTGRES_DB=${POSTGRES_DB:-leeksaver}
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/1
-      - LLM_PROVIDER=${LLM_PROVIDER:-deepseek}
-      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
-      - DEEPSEEK_BASE_URL=${DEEPSEEK_BASE_URL:-https://api.deepseek.com/v1}
-      - DEEPSEEK_MODEL=${DEEPSEEK_MODEL:-deepseek-chat}
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4-turbo-preview}
-      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://localhost:11434}
-      - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen2.5:14b}
-      - EMBEDDING_PROVIDER=${EMBEDDING_PROVIDER:-siliconflow}
-      - EMBEDDING_SILICONFLOW_API_KEY=${EMBEDDING_SILICONFLOW_API_KEY}
-      - EMBEDDING_SILICONFLOW_BASE_URL=${EMBEDDING_SILICONFLOW_BASE_URL:-https://api.siliconflow.cn/v1}
-      - EMBEDDING_SILICONFLOW_MODEL=${EMBEDDING_SILICONFLOW_MODEL:-BAAI/bge-m3}
-      - EMBEDDING_SILICONFLOW_DIMENSION=${EMBEDDING_SILICONFLOW_DIMENSION:-1024}
-      - EMBEDDING_OLLAMA_BASE_URL=${EMBEDDING_OLLAMA_BASE_URL:-http://localhost:11434}
-      - EMBEDDING_OLLAMA_MODEL=${EMBEDDING_OLLAMA_MODEL:-nomic-embed-text}
-      - EMBEDDING_OLLAMA_DIMENSION=${EMBEDDING_OLLAMA_DIMENSION:-768}
-      - NEWS_RETENTION_YEARS=${NEWS_RETENTION_YEARS:-1}
-      - CLEANUP_NEWS_HOUR=${CLEANUP_NEWS_HOUR:-2}
-      - CLEANUP_NEWS_MINUTE=${CLEANUP_NEWS_MINUTE:-0}
     ports:
       - "${API_PORT:-8000}:8000"
     volumes:
@@ -90,35 +70,15 @@ services:
       dockerfile: Dockerfile
     container_name: leeksaver-celery-worker
     command: celery -A app.tasks.celery_app worker --loglevel=info
+    env_file:
+      - .env
     environment:
       - POSTGRES_HOST=db
       - POSTGRES_PORT=5432
-      - POSTGRES_USER=${POSTGRES_USER:-leeksaver}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-leeksaver_password}
-      - POSTGRES_DB=${POSTGRES_DB:-leeksaver}
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/1
-      - LLM_PROVIDER=${LLM_PROVIDER:-deepseek}
-      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
-      - DEEPSEEK_BASE_URL=${DEEPSEEK_BASE_URL:-https://api.deepseek.com/v1}
-      - DEEPSEEK_MODEL=${DEEPSEEK_MODEL:-deepseek-chat}
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4-turbo-preview}
-      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://localhost:11434}
-      - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen2.5:14b}
-      - EMBEDDING_PROVIDER=${EMBEDDING_PROVIDER:-siliconflow}
-      - EMBEDDING_SILICONFLOW_API_KEY=${EMBEDDING_SILICONFLOW_API_KEY}
-      - EMBEDDING_SILICONFLOW_BASE_URL=${EMBEDDING_SILICONFLOW_BASE_URL:-https://api.siliconflow.cn/v1}
-      - EMBEDDING_SILICONFLOW_MODEL=${EMBEDDING_SILICONFLOW_MODEL:-BAAI/bge-m3}
-      - EMBEDDING_SILICONFLOW_DIMENSION=${EMBEDDING_SILICONFLOW_DIMENSION:-1024}
-      - EMBEDDING_OLLAMA_BASE_URL=${EMBEDDING_OLLAMA_BASE_URL:-http://localhost:11434}
-      - EMBEDDING_OLLAMA_MODEL=${EMBEDDING_OLLAMA_MODEL:-nomic-embed-text}
-      - EMBEDDING_OLLAMA_DIMENSION=${EMBEDDING_OLLAMA_DIMENSION:-768}
-      - NEWS_RETENTION_YEARS=${NEWS_RETENTION_YEARS:-1}
-      - CLEANUP_NEWS_HOUR=${CLEANUP_NEWS_HOUR:-2}
-      - CLEANUP_NEWS_MINUTE=${CLEANUP_NEWS_MINUTE:-0}
     volumes:
       - ./backend:/app
     depends_on:
@@ -135,35 +95,15 @@ services:
       dockerfile: Dockerfile
     container_name: leeksaver-celery-beat
     command: celery -A app.tasks.celery_app beat --loglevel=info
+    env_file:
+      - .env
     environment:
       - POSTGRES_HOST=db
       - POSTGRES_PORT=5432
-      - POSTGRES_USER=${POSTGRES_USER:-leeksaver}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-leeksaver_password}
-      - POSTGRES_DB=${POSTGRES_DB:-leeksaver}
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/1
-      - LLM_PROVIDER=${LLM_PROVIDER:-deepseek}
-      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
-      - DEEPSEEK_BASE_URL=${DEEPSEEK_BASE_URL:-https://api.deepseek.com/v1}
-      - DEEPSEEK_MODEL=${DEEPSEEK_MODEL:-deepseek-chat}
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4-turbo-preview}
-      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://localhost:11434}
-      - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen2.5:14b}
-      - EMBEDDING_PROVIDER=${EMBEDDING_PROVIDER:-siliconflow}
-      - EMBEDDING_SILICONFLOW_API_KEY=${EMBEDDING_SILICONFLOW_API_KEY}
-      - EMBEDDING_SILICONFLOW_BASE_URL=${EMBEDDING_SILICONFLOW_BASE_URL:-https://api.siliconflow.cn/v1}
-      - EMBEDDING_SILICONFLOW_MODEL=${EMBEDDING_SILICONFLOW_MODEL:-BAAI/bge-m3}
-      - EMBEDDING_SILICONFLOW_DIMENSION=${EMBEDDING_SILICONFLOW_DIMENSION:-1024}
-      - EMBEDDING_OLLAMA_BASE_URL=${EMBEDDING_OLLAMA_BASE_URL:-http://localhost:11434}
-      - EMBEDDING_OLLAMA_MODEL=${EMBEDDING_OLLAMA_MODEL:-nomic-embed-text}
-      - EMBEDDING_OLLAMA_DIMENSION=${EMBEDDING_OLLAMA_DIMENSION:-768}
-      - NEWS_RETENTION_YEARS=${NEWS_RETENTION_YEARS:-1}
-      - CLEANUP_NEWS_HOUR=${CLEANUP_NEWS_HOUR:-2}
-      - CLEANUP_NEWS_MINUTE=${CLEANUP_NEWS_MINUTE:-0}
     volumes:
       - ./backend:/app
     depends_on:
