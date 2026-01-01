@@ -66,12 +66,17 @@ class AlertService:
     def send_dqa_report(cls, results: list, stubborn_codes: set = None):
         """
         基于 DQA 巡检结果发送结构化报告邮件
-        """
-        # 只有在存在 Critical 或顽疾标的时才发送邮件 (或者由配置决定)
-        has_critical = any(r.status == "critical" for r in results)
-        has_stubborn = stubborn_codes and len(stubborn_codes) > 0
         
-        if not (has_critical or has_stubborn):
+        优化策略：仅在需要“人工干预”时骚扰管理员。
+        1. 存在“顽疾”标的 (stubborn_codes) -> 必须报。
+        2. 系统新鲜度异常 (freshness critical) -> 说明同步链路断了，必须报。
+        3. 覆盖率或逻辑错误 -> 系统会自动下发自愈任务，暂不骚扰管理员。
+        """
+        has_stubborn = stubborn_codes and len(stubborn_codes) > 0
+        has_system_failure = any(r.metric_name == "freshness" and r.status == "critical" for r in results)
+        
+        if not (has_stubborn or has_system_failure):
+            logger.info("ℹ️ 巡检异常已由自愈系统接管，无需发送告警邮件。")
             return
 
         now = cls._get_now_str()
