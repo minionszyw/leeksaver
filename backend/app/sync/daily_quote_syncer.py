@@ -43,7 +43,7 @@ class DailyQuoteSyncer:
         async with get_db_session() as session:
             repo = MarketDataRepository(session)
 
-            # 确定起始日期
+            # 确定起始日期：如果未传入则根据 DB 计算
             if start_date is None:
                 latest_date = await repo.get_latest_trade_date(code)
                 quote_count = await repo.get_quote_count(code)
@@ -88,6 +88,8 @@ class DailyQuoteSyncer:
         codes: list[str],
         progress_callback: Callable[[int, int], None] | None = None,
         max_concurrent: int = 10,
+        start_date: date | None = None,
+        end_date: date | None = None,
     ) -> dict:
         """
         批量同步日线行情
@@ -117,7 +119,13 @@ class DailyQuoteSyncer:
             async with semaphore:
                 try:
                     asset_type = asset_types.get(code, "stock")
-                    count = await self.sync_single(code, asset_type=asset_type)
+                    # 透传日期参数
+                    count = await self.sync_single(
+                        code, 
+                        asset_type=asset_type, 
+                        start_date=start_date, 
+                        end_date=end_date
+                    )
                     stats["records"] += count
                     stats["success"] += 1
                     success_codes.append(code)

@@ -81,7 +81,7 @@ class DataDoctor:
         self._generate_report()
 
         # 5. 执行自愈修复 (补录)
-        await self._auto_repair_smart()
+        await self._auto_repair_smart(check_date)
 
         # 6. [新增] 发送报警邮件 (如果有异常)
         try:
@@ -248,18 +248,32 @@ class DataDoctor:
             logger.info(f"[{r.status.upper():<8}] {r.message}")
         logger.info("="*40)
 
-    async def _auto_repair_smart(self):
-        """智能自愈：下发补录任务"""
+    async def _auto_repair_smart(self, check_date: date):
+        """智能自愈：针对缺失和损坏的代码重新同步数据"""
         all_to_fix = list(self.missing_codes | self.corrupted_codes)
-        if not all_to_fix: return
-        logger.info(f"🔧 启动自愈修复: 待修复标的 {len(all_to_fix)} 只")
+        
+        if not all_to_fix:
+            logger.info("✅ 巡检通过，无需执行修复")
+            return
+
+        logger.info(f"🔧 启动自愈修复: 待修复标的 {len(all_to_fix)} 只 (缺失: {len(self.missing_codes)}, 损坏: {len(self.corrupted_codes)})")
+        
         try:
             from app.tasks.sync_tasks import sync_daily_quotes
+            
+            # 强制指定日期范围为 check_date，确保重刷修复生效
+            check_date_str = str(check_date)
+            
             chunk_size = 100
             for i in range(0, len(all_to_fix), chunk_size):
                 chunk = all_to_fix[i : i + chunk_size]
-                sync_daily_quotes.delay(codes=chunk, is_chunk=True)
-            logger.info(f"🚀 已下发 {len(all_to_fix)} 只标的的自愈分片任务")
+                sync_daily_quotes.delay(
+                    codes=chunk, 
+                    is_chunk=True,
+                    start_date=check_date_str,
+                    end_date=check_date_str
+                )
+            logger.info(f"🚀 已下发分片自愈任务 (指定日期: {check_date_str})，总计 {len(all_to_fix)} 只标的")
         except Exception as e:
             logger.error(f"❌ 自愈任务下发失败: {e}")
 

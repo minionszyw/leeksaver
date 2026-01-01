@@ -41,7 +41,13 @@ def sync_stock_list(self):
 
 
 @shared_task(bind=True, max_retries=3)
-def sync_daily_quotes(self, codes: list[str] | None = None, is_chunk: bool = False):
+def sync_daily_quotes(
+    self, 
+    codes: list[str] | None = None, 
+    is_chunk: bool = False,
+    start_date: str | None = None,
+    end_date: str | None = None
+):
     """
     同步日线行情数据 (L1)
 
@@ -52,6 +58,11 @@ def sync_daily_quotes(self, codes: list[str] | None = None, is_chunk: bool = Fal
     from app.sync.daily_quote_syncer import daily_quote_syncer
     from app.core.database import get_db_session
     from app.repositories.stock_repository import StockRepository
+    from datetime import date
+
+    # 转换日期字符串为 date 对象
+    s_date = date.fromisoformat(start_date) if start_date else None
+    e_date = date.fromisoformat(end_date) if end_date else None
 
     if codes is None:
         # 1. 生产者模式：获取全量代码并分片分发任务
@@ -71,16 +82,28 @@ def sync_daily_quotes(self, codes: list[str] | None = None, is_chunk: bool = Fal
         logger.info(f"全市场共 {len(all_codes)} 只标的，切分为 {len(chunks)} 个分片执行")
         
         for chunk in chunks:
-            sync_daily_quotes.delay(codes=chunk, is_chunk=True)
+            # 递归调用时透传日期参数
+            sync_daily_quotes.delay(
+                codes=chunk, 
+                is_chunk=True, 
+                start_date=start_date, 
+                end_date=end_date
+            )
             
         return {"status": "dispatched", "chunks": len(chunks), "total": len(all_codes)}
 
     # 2. 消费者模式：执行具体的同步
     scope = f"分片任务({len(codes)}只)" if is_chunk else f"{len(codes)} 只股票"
-    logger.info("开始同步日线行情", scope=scope)
+    logger.info("开始同步日线行情", scope=scope, start_date=start_date)
 
     try:
-        result = run_async(daily_quote_syncer.sync_batch(codes, max_concurrent=5))
+        # 传递日期参数给 syncer
+        result = run_async(daily_quote_syncer.sync_batch(
+            codes, 
+            max_concurrent=5, 
+            start_date=s_date, 
+            end_date=e_date
+        ))
         logger.info("日线行情同步完成", scope=scope, **result)
         return {"status": "success", "scope": scope, **result}
     except Exception as e:

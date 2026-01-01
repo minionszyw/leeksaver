@@ -182,10 +182,13 @@ class Settings(BaseSettings):
 
     # 日志配置
     log_level: str = "INFO"
-    log_format: Literal["json", "console"] = "json"
+    log_format: str = "json"
 
-    # ==================== 邮件报警配置 (SMTP) ====================
-    smtp_enabled: bool = Field(default=False, description="是否启用邮件报警")
+    # 时区配置
+    timezone: str = "Asia/Shanghai"
+
+    # 邮件报警配置
+    smtp_enabled: bool = False
     smtp_host: str = Field(default="smtp.qq.com", description="SMTP 服务器地址")
     smtp_port: int = Field(default=465, description="SMTP 端口 (通常为 465 或 587)")
     smtp_user: str = Field(default="", description="SMTP 用户名/邮箱")

@@ -9,6 +9,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-leeksaver}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-leeksaver_password}
       POSTGRES_DB: ${POSTGRES_DB:-leeksaver}
+      TZ: Asia/Shanghai
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
@@ -25,6 +26,8 @@ services:
   redis:
     image: redis:7-alpine
     container_name: leeksaver-redis
+    environment:
+      TZ: Asia/Shanghai
     ports:
       - "${REDIS_PORT:-6379}:6379"
     volumes:
@@ -52,6 +55,7 @@ services:
       - REDIS_PORT=6379
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/1
+      - TZ=Asia/Shanghai
     ports:
       - "${API_PORT:-8000}:8000"
     volumes:
@@ -79,6 +83,7 @@ services:
       - REDIS_PORT=6379
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/1
+      - TZ=Asia/Shanghai
     volumes:
       - ./backend:/app
     depends_on:
@@ -104,6 +109,7 @@ services:
       - REDIS_PORT=6379
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/1
+      - TZ=Asia/Shanghai
     volumes:
       - ./backend:/app
     depends_on:

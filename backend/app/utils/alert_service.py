@@ -8,6 +8,7 @@ import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime
+import pytz
 
 from app.config import settings
 from app.core.logging import get_logger
@@ -16,6 +17,12 @@ logger = get_logger(__name__)
 
 class AlertService:
     """报警通知服务"""
+
+    @staticmethod
+    def _get_now_str() -> str:
+        """获取带时区格式化的当前时间字符串"""
+        tz = pytz.timezone(settings.timezone)
+        return datetime.now(tz).strftime("%Y-%m-%d %H:%M:%S")
 
     @staticmethod
     def send_email(subject: str, html_content: str):
@@ -67,7 +74,7 @@ class AlertService:
         if not (has_critical or has_stubborn):
             return
 
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        now = cls._get_now_str()
         
         # 构建 HTML 表格
         rows = ""
