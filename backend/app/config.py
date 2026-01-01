@@ -184,6 +184,16 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     log_format: Literal["json", "console"] = "json"
 
+    # ==================== 邮件报警配置 (SMTP) ====================
+    smtp_enabled: bool = Field(default=False, description="是否启用邮件报警")
+    smtp_host: str = Field(default="smtp.qq.com", description="SMTP 服务器地址")
+    smtp_port: int = Field(default=465, description="SMTP 端口 (通常为 465 或 587)")
+    smtp_user: str = Field(default="", description="SMTP 用户名/邮箱")
+    smtp_password: str = Field(default="", description="SMTP 授权码/密码")
+    smtp_from: str = Field(default="", description="发件人显示地址")
+    smtp_to: str = Field(default="", description="报警接收人地址")
+    smtp_tls: bool = Field(default=True, description="是否使用 SSL/TLS")
+
     # ==================== 配置验证器 ====================
 
     @field_validator("sync_l1_daily_time")

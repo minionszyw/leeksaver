@@ -247,6 +247,22 @@ class AkShareAdapter(DataSourceBase):
             if result["trade_date"].dtype != pl.Date:
                 result = result.with_columns(pl.col("trade_date").str.to_date("%Y-%m-%d"))
 
+            # --- [核心增强] 深度清洗：量纲自动校准 (处理 100倍 股/手误差) ---
+            # 原理：均价 (amount / volume) 必须在 [low, high] 附近。
+            # 如果偏离 100 倍，说明单位错了。
+            result = result.with_columns([
+                pl.struct(["amount", "volume", "low", "high"]).map_elements(
+                    lambda x: (
+                        # 场景 A: 均价偏大 100 倍 -> Volume 被当成了 手 (需 x100 变股)
+                        int(x["volume"] * 100) if (x["volume"] > 0 and (x["amount"]/x["volume"]) > x["high"] * 50) 
+                        # 场景 B: 均价偏小 100 倍 -> Volume 被当成了 股，但其实是更大的单位 (或 Amount 是万元)
+                        # 这种情况在 A股 较少，通常是 amount 单位不对，优先维持 volume 逻辑。
+                        else int(x["volume"])
+                    ),
+                    return_dtype=pl.Int64
+                ).alias("volume")
+            ])
+
             # 选择并强制转换类型
             result = result.select(
                 pl.lit(code).alias("code"),

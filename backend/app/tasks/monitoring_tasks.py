@@ -14,7 +14,7 @@ def daily_health_check():
     """
     每日数据健康巡检任务
 
-    执行时间：每天 09:00
+    执行时间：根据配置执行 (环境变量 HEALTH_CHECK_HOUR/MINUTE)
     功能：检查数据覆盖率、新鲜度、完整性、质量 (Data Doctor Pro)
     """
     import asyncio

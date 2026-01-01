@@ -214,7 +214,7 @@ L0_TASKS = [
         task_path="daily_data_health_check",
         tier=TaskTier.L0,
         schedule_type=ScheduleType.CRONTAB,
-        description="数据健康巡检（每天 09:00）",
+        description="每日数据健康深度巡检与自愈 (Data Doctor Pro)",
     ),
     TaskMetadata(
         name="weekly-calendar-sync",
