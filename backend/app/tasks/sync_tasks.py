@@ -40,7 +40,12 @@ def sync_stock_list(self):
         raise self.retry(exc=e, countdown=60)
 
 
-@shared_task(bind=True, max_retries=3)
+@shared_task(
+    bind=True, 
+    max_retries=3,
+    time_limit=600,        # 10分钟硬超时：强制杀死
+    soft_time_limit=500    # 约8分钟软超时：抛出异常供代码捕获
+)
 def sync_daily_quotes(
     self, 
     codes: list[str] | None = None, 

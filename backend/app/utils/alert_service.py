@@ -70,12 +70,14 @@ class AlertService:
         优化策略：仅在需要“人工干预”时骚扰管理员。
         1. 存在“顽疾”标的 (stubborn_codes) -> 必须报。
         2. 系统新鲜度异常 (freshness critical) -> 说明同步链路断了，必须报。
-        3. 覆盖率或逻辑错误 -> 系统会自动下发自愈任务，暂不骚扰管理员。
+        3. 覆盖率出现严重空洞 (CRITICAL) -> 意味着自动修复可能赶不上损耗，必须报。
+        4. 普通 WARNING 覆盖率或逻辑错误 -> 系统会自动下发自愈任务，保持静默。
         """
         has_stubborn = stubborn_codes and len(stubborn_codes) > 0
         has_system_failure = any(r.metric_name == "freshness" and r.status == "critical" for r in results)
+        has_critical_void = any(r.metric_name.endswith("_coverage") and r.status == "critical" for r in results)
         
-        if not (has_stubborn or has_system_failure):
+        if not (has_stubborn or has_system_failure or has_critical_void):
             logger.info("ℹ️ 巡检异常已由自愈系统接管，无需发送告警邮件。")
             return
 
