@@ -110,6 +110,13 @@ def generate_beat_schedule() -> dict:
                     hour=22,
                     minute=0,
                 )
+            elif "calendar" in task_meta.name:
+                # 交易日历同步（每周日 03:00）
+                schedule_config = crontab(
+                    day_of_week=0,  # 0 为周日
+                    hour=3,
+                    minute=0,
+                )
             elif "health" in task_meta.name:
                 # 数据健康巡检（每天 09:00）
                 schedule_config = crontab(

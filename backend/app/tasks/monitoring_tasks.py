@@ -15,7 +15,7 @@ def daily_health_check():
     每日数据健康巡检任务
 
     执行时间：每天 09:00
-    功能：检查数据覆盖率、新鲜度、完整性、质量
+    功能：检查数据覆盖率、新鲜度、完整性、质量 (Data Doctor Pro)
     """
     import asyncio
     from app.monitoring.data_doctor import data_doctor

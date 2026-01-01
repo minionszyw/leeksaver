@@ -120,30 +120,6 @@ sync_stock_list.delay()
 - **API 文档**: http://localhost:8000/docs
 - **健康检查**: http://localhost:8000/api/v1/health
 
-## 📖 文档
-
-- [部署指南](docs/DEPLOYMENT.md) - 完整的部署说明和配置
-- [开发指南](docs/DEVELOPMENT.md) - 开发环境搭建和开发规范
-- [系统设计](docs/系统设计说明书.md) - 详细的系统设计文档
-
-## 🧪 测试
-
-```bash
-cd backend
-
-# 运行所有测试
-pytest
-
-# 运行单元测试
-pytest tests/unit -v
-
-# 运行集成测试
-pytest tests/integration -v
-
-# 生成覆盖率报告
-pytest --cov=app --cov-report=html
-```
-
 ## 📦 项目结构
 
 ```
@@ -164,7 +140,7 @@ LeekSaver/
 │       ├── pages/       # 页面
 │       ├── services/    # API 服务
 │       └── stores/      # 状态管理
-├── docs/                # 文档
+├── .env.example         # 文档
 └── docker-compose.yml   # Docker 配置
 ```
 
@@ -187,33 +163,6 @@ LeekSaver/
 - 添加/移除自选股
 - 一键分析自选股
 - 实时行情展示
-
-## 🔧 配置说明
-
-### LLM 配置
-
-支持三种 LLM 提供商：
-
-**1. DeepSeek (推荐)**
-```env
-LLM_PROVIDER=deepseek
-DEEPSEEK_API_KEY=your_api_key
-DEEPSEEK_MODEL=deepseek-chat
-```
-
-**2. OpenAI**
-```env
-LLM_PROVIDER=openai
-OPENAI_API_KEY=your_api_key
-OPENAI_MODEL=gpt-4-turbo-preview
-```
-
-**3. Ollama (本地)**
-```env
-LLM_PROVIDER=ollama
-OLLAMA_BASE_URL=http://localhost:11434
-OLLAMA_MODEL=qwen2.5:14b
-```
 
 ## 🤝 贡献
 

@@ -475,6 +475,25 @@ def calculate_tech_indicators(self):
 
 
 @shared_task(bind=True, max_retries=3)
+def sync_trading_calendar(self):
+    """
+    同步交易日历 (L0)
+    
+    每周运行一次，同步过去 2 年和未来 1 年的交易日
+    """
+    from app.sync.calendar_syncer import calendar_syncer
+
+    logger.info("开始同步交易日历")
+    try:
+        result = run_async(calendar_syncer.sync())
+        logger.info("交易日历同步完成", **result)
+        return result
+    except Exception as e:
+        logger.error("交易日历同步失败", error=str(e))
+        raise self.retry(exc=e, countdown=300)
+
+
+@shared_task(bind=True, max_retries=3)
 def sync_sector_quotes(self):
     """
     同步板块行情数据

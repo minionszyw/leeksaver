@@ -22,8 +22,8 @@ LeekSaver 采用 **“时序行情 + 向量资讯 + 关联基础”** 的三位�
 ### 4. 同步分层策略 (Sync Layers)
 | 层次 | 定义 | 同步范围 | 触发频率 | 典型数据 |
 | :--- | :--- | :--- | :--- | :--- |
-| **L0** | 周更组 | 全市场 | 每周六 | 财务报表、宏观指标、经营数据 |
-| **L1** | 日更组 | 全市场 | 每日 17:30 (收盘后) | 股票列表、日线行情、每日估值、融资融券、板块基础、资金流向、涨停股、龙虎榜、北向资金、市场情绪、技术指标 |
+| **L0** | 周更组 | 全市场 | 每周 | 财务报表、宏观指标、经营数据、交易日历 |
+| **L1** | 日更组 | 全市场 | 每日 | 股票列表、日线行情、每日估值、融资融券、板块基础、资金流向、涨停股、龙虎榜、北向资金、市场情绪、技术指标 |
 | **L2** | 日内组 | 全市场 | 固定间隔 (默认 120s) | 股票新闻、分时行情（自选股）、板块行情、全市快讯 |
 | **L3** | 按需组 | 个股/指标 | 实时触发 (API/缓存) |  |
 
@@ -76,6 +76,7 @@ graph TD
 
 | 表名 | 中文名 | 类型 | 来源 | 接口 | 同步器 | 分层 | 数据量 | 备注 |
 | :--- | :--- | :-: | :-: | :--- | :--- | :-: | --: | :--- |
+| `trading_calendar` | 交易日历 | 普通 | AKShare | `tool_trade_date_hist_sina` | `sync_trading_calendar` | L0 | 727 | 法定节假日/调休处理 |
 | `daily_quotes` | 日线行情 | 超表 | AKShare | `stock_zh_a_hist` | `sync_daily_quotes` | L1 | 3,095,446 | 核心行情 (TimescaleDB) |
 | `financial_statements` | 财务报表 | 普通 | AKShare | `stock_financial_abstract_ths` | `sync_financial_statements` | L0 | 42,893 | 每季度更新 |
 | `stocks` | 股票列表 | 普通 | AKShare | `stock_info_a_code_name` | `sync_stock_list` | L1 | 6,798 | 基础档案 |
@@ -414,3 +415,8 @@ graph TD
   - `resolved_at` (DateTime): 成功恢复的时间
 - **`alembic_version` (数据库版本表)**
   - `version_num` (String): 当前数据库版本 Hash
+
+### 9. 交易日历
+- **`trading_calendar` (交易日历表)**
+  - `trade_date` (Date): 交易日期 (主键)
+  - `is_open` (Boolean): 是否开市 (True 表示交易日)

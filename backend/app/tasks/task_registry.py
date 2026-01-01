@@ -216,6 +216,13 @@ L0_TASKS = [
         schedule_type=ScheduleType.CRONTAB,
         description="数据健康巡检（每天 09:00）",
     ),
+    TaskMetadata(
+        name="weekly-calendar-sync",
+        task_path="app.tasks.sync_tasks.sync_trading_calendar",
+        tier=TaskTier.L0,
+        schedule_type=ScheduleType.CRONTAB,
+        description="交易日历同步（每周日 03:00）",
+    ),
 ]
 
 

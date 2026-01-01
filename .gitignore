@@ -78,8 +78,4 @@ celerybeat.pid
 # Alembic
 alembic/versions/*.pyc
 
-debug_*.py
-test_*.py
-
-rv.md
 .geminiignore

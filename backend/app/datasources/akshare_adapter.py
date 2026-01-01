@@ -727,6 +727,35 @@ class AkShareAdapter(DataSourceBase):
                 stock_df = stock_df.with_columns(pl.lit(None, dtype=pl.Date).alias("list_date"))
             return stock_df
 
+    async def get_trading_calendar(self) -> pl.DataFrame:
+        """
+        获取 A 股交易日历
+
+        使用 tool_trade_date_hist_sina 接口
+        """
+        logger.info("获取 A 股交易日历")
+
+        try:
+            df = await self._run_sync(ak.tool_trade_date_hist_sina)
+            
+            if df is None or df.empty:
+                logger.warning("交易日历数据为空")
+                return pl.DataFrame()
+
+            # 转换为 Polars DataFrame
+            result = pl.from_pandas(df)
+            
+            # 规范化列名 (接口返回 trade_date)
+            if "trade_date" not in result.columns:
+                # 有些版本的 akshare 可能返回 '日期'
+                result = result.rename({result.columns[0]: "trade_date"})
+
+            return result
+
+        except Exception as e:
+            logger.error("获取交易日历失败", error=str(e))
+            raise
+
     async def get_all_stock_quotes(self) -> pl.DataFrame:
         """
         获取全市场股票实时行情快照

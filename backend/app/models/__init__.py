@@ -18,6 +18,9 @@ from app.models.financial import FinancialStatement
 # 新闻数据
 from app.models.news import NewsArticle
 
+# 交易日历
+from app.models.calendar import TradingCalendar
+
 # 宏观数据
 from app.models.macro import MacroIndicator
 
@@ -45,6 +48,8 @@ __all__ = [
     # 基础
     "Base",
     "TimestampMixin",
+    # 交易日历
+    "TradingCalendar",
     # 股票
     "Stock",
     "Watchlist",
