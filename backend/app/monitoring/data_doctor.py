@@ -260,6 +260,7 @@ class DataDoctor:
         
         try:
             from app.tasks.sync_tasks import sync_daily_quotes
+            from app.tasks.monitoring_tasks import daily_health_check
             
             # 强制指定日期范围为 check_date，确保重刷修复生效
             check_date_str = str(check_date)
@@ -273,7 +274,14 @@ class DataDoctor:
                     start_date=check_date_str,
                     end_date=check_date_str
                 )
+            
             logger.info(f"🚀 已下发分片自愈任务 (指定日期: {check_date_str})，总计 {len(all_to_fix)} 只标的")
+
+            # [关键加固] 自动调度 30 分钟后的“回头看”复查任务
+            # 这样如果修好了，30分钟后系统保持静默；如果没修好，30分钟后您会收到告警，而不是等到明天。
+            daily_health_check.apply_async(countdown=1800) # 1800秒 = 30分钟
+            logger.info("🕒 已自动预约 30 分钟后的‘结果复查任务’")
+
         except Exception as e:
             logger.error(f"❌ 自愈任务下发失败: {e}")
 
